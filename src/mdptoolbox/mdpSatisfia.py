@@ -618,7 +618,7 @@ class PolicyIteration(MDP):
     """
 
     def __init__(self, transitions, reward, discount, policy0=None,
-                 max_iter=1000, eval_type=0, skip_check=False, l):
+                 max_iter=1000, eval_type=0, skip_check=False, l=0.5):
         # Initialise a policy iteration MDP.
         #
         # Set up the MDP, but don't need to worry about epsilon values
