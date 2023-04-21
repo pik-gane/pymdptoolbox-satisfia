@@ -236,40 +236,6 @@ class MDP(object):
             P_repr += repr(self.P[aa]) + "\n"
             R_repr += repr(self.R[aa]) + "\n"
         return(P_repr + "\n" + R_repr)
-
-    #def _bellmanOperator(self, V=None):
-        # Apply the Bellman operator on the value function.
-        #
-        # Updates the value function and the Vprev-improving policy.
-        #
-        # Returns: (policy, value), tuple of new policy and its value
-        #
-        # If V hasn't been sent into the method, then we assume to be working
-        # on the objects V attribute
-        if V is None:
-            # this V should be a reference to the data rather than a copy
-            V = self.V
-        else:
-            # make sure the user supplied V is of the right shape
-            try:
-                assert V.shape in ((self.S,), (1, self.S)), "V is not the " \
-                    "right shape (Bellman operator)."
-            except AttributeError:
-                raise TypeError("V must be a numpy array or matrix.")
-        # Looping through each action the the Q-value matrix is calculated.
-        # P and V can be any object that supports indexing, so it is important
-        # that you know they define a valid MDP before calling the
-        # _bellmanOperator method. Otherwise the results will be meaningless.
-        Q = _np.empty((self.A, self.S))
-        for aa in range(self.A):
-            Q[aa] = self.R[aa] + self.discount * self.P[aa].dot(V)
-        # Get the policy and value, for now it is being returned but...
-        # Which way is better?
-        # 1. Return, (policy, value)
-        return (Q.argmax(axis=0), Q.max(axis=0))
-        # 2. update self.policy and self.V directly
-        # self.V = Q.max(axis=1)
-        # self.policy = Q.argmax(axis=1)
     
     def _satisficing(self, V=None):
         # Returns: new policy 
@@ -295,14 +261,17 @@ class MDP(object):
         for aa in range(self.A):
             Q[aa] = self.R[aa] + self.discount * self.P[aa].dot(V)
         q_target = self.l * Q.max(axis=0) + (1-self.l) * Q.min(axis=0)
-
-        Policy = _np.zeros(self.S)
+        
+         Policy = _np.zeros(self.S)
         for state in range(self.S):
             idx_sorted = _np.argsort(Q[:, state])
             idx = _np.searchsorted(Q[:, state], q_target[state], side = 'left', sorter = idx_sorted)
-            alpha = (Q[:, state][idx_sorted][idx] - q_target[state])/(Q[:, state][idx_sorted][idx] - Q[:, state][idx_sorted][idx-1])
-            rand_ber = _np.random.binomial(1, alpha)
-            Policy[state] = rand_ber * idx_sorted[idx-1] + (1-rand_ber) * idx_sorted[idx]
+            if idx == 0:
+                Policy[state] = idx_sorted[idx]
+            else:
+                alpha = (Q[:, state][idx_sorted][idx] - q_target[state])/(Q[:, state][idx_sorted][idx] - Q[:, state][idx_sorted][idx-1])
+                rand_ber = _np.random.binomial(1, alpha)
+                Policy[state] = rand_ber * idx_sorted[idx-1] + (1-rand_ber) * idx_sorted[idx]
         return Policy.astype(int)
 
     def _computeTransition(self, transition):
