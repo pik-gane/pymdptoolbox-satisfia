@@ -48,7 +48,78 @@ Available functions
 
 import numpy as _np
 import scipy.sparse as _sp
+from random import choices
+from random import choice
 
+def smallMDP():
+    """ Example from email on 15.04.2023
+    
+    States: 0: s0; 1: sA; ...
+    Actions: 0: A; 1: B; ...
+    Transition probabilities (A x S x S):
+    
+        P[0, :, :] =    |0 1 0 0 0 0 0|
+                        |0 1 0 0 0 0 0|
+                        |. . . . . . .|
+                        |0 1 0 0 0 0 0|
+        
+        P[1, :, :] =    |0 0 1/2 1/2 0 0 0|
+                        |0 0 1/2 1/2 0 0 0|
+                        |. . . . . . . . .|
+                        |0 0 1/2 1/2 0 0 0|
+                        
+        P[2, :, :] =    |0 0 0 0 1/2 1/2 0|
+                        |0 0 0 0 1/2 1/2 0|
+                        |. . . . . . . . .|
+                        |0 0 0 0 1/2 1/2 0|
+                        
+        P[(3, 4, 5), :, :] =    |0 0 0 0 0 0 1|
+                                |0 0 0 0 0 0 1|
+                                |. . . . . . .|
+                                |0 0 0 0 0 0 1|
+
+                        
+    Reward matrix (S x A):
+    
+        R = | 0  0  0         0        0  0|
+            |18 18 18 (18+36)/2 (9+45)/2 54|
+            | 6  6  6  (6+12)/2 (3+15)/2 18|
+            |18 18 18 (18+36)/2 (9+45)/2 54|
+            | 8  8  8  (8+16)/2 (4+20)/2 24|
+            |16 16 16 (16+32)/2 (8+40)/2 48|
+            | 2  2  2   (2+4)/2  (1+5)/2  6|
+
+    
+    """
+    #Transition probability matrix
+    P = _np.zeros((6, 7, 7))
+    P[0, :, 1] = _np.ones(7)
+    P[1, :, (2, 3)] = 1/2 * _np.ones(7)
+    P[2, :, (4, 5)] = 1/2 * _np.ones(7)
+    P[(3, 4, 5), :, 6] = _np.ones(7)
+    
+    #Reward matrix
+    R = _np.zeros((7, 6))
+    sAB9 = _np.array([18, 18, 18, int(choice([18, 36])), int(choice([9, 45])), 54])
+    sB3 = _np.array([6, 6, 6, choice([6, 12]), choice([3, 15]), 18])
+    sC4 = _np.array([8, 8, 8, choice([8, 16]), choice([4, 20]), 24])
+    sC8 = _np.array([16, 16, 16, choice([16, 32]), choice([8, 40]), 48])
+    sDEF = _np.array([2, 2, 2, choice([2, 4]), choice([1, 5]), 6])
+    
+    R[(1, 3), :] = sAB9
+    R[2, :] = sB3
+    R[4, :] = sC4
+    R[5, :] = sC8
+    R[6, :] = sDEF
+    
+    return (P, R)
+    
+def Reward_SmallMDP(P, R, policy):
+    # Probability of starting in state 0 with action given by policy[0]. 
+    State = choices(range(len(P[policy[0], 0, :])), P[policy[0], 0, :])[0]
+    return (R[State, policy[State]], State)
+
+    
 
 def forest(S=3, r1=4, r2=2, p=0.1, is_sparse=False):
     """Generate a MDP example based on a simple forest management scenario.
@@ -186,6 +257,7 @@ def forest(S=3, r1=4, r2=2, p=0.1, is_sparse=False):
     R[:, 1] = _np.ones(S)
     R[0, 1] = 0
     R[S - 1, 1] = r2
+    
     return(P, R)
 
 
