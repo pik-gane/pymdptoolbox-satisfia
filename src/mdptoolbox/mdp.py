@@ -262,15 +262,20 @@ class MDP(object):
             Q[aa] = self.R[aa] + self.discount * self.P[aa].dot(V)
         q_target = self.l * Q.max(axis=0) + (1-self.l) * Q.min(axis=0)
         
-         Policy = _np.zeros(self.S)
+        Policy = _np.zeros(self.S)
         for state in range(self.S):
+            # To avoid sorting the Q function, an array is created that sorts the Q function. 
             idx_sorted = _np.argsort(Q[:, state])
+            # Find the index of which the value in the Q function is equal to or larger than q_target. 
             idx = _np.searchsorted(Q[:, state], q_target[state], side = 'left', sorter = idx_sorted)
+            # If idx is zero, we can not interpolate with smaller values. 
             if idx == 0:
                 Policy[state] = idx_sorted[idx]
             else:
+                # Calculate the probability of choosing the action which will lead to the Q-value smaller than q_target.
                 alpha = (Q[:, state][idx_sorted][idx] - q_target[state])/(Q[:, state][idx_sorted][idx] - Q[:, state][idx_sorted][idx-1])
                 rand_ber = _np.random.binomial(1, alpha)
+                # Choose the action which will lead to the Q-value smaller than q_target with probability alpha and the action leading to larger Q-value otherwise.
                 Policy[state] = rand_ber * idx_sorted[idx-1] + (1-rand_ber) * idx_sorted[idx]
         return Policy.astype(int)
 
