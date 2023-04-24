@@ -629,7 +629,7 @@ class PolicyIteration(MDP):
     def __init__(self, transitions, reward, discount, l=0.5, policy0=None,
                  max_iter = 1000, max_value_iter = 1000, eval_type=0, skip_check=False):
         # Initialise a policy iteration MDP.
-        #
+        # Setting l=1 will lead to optimising (Bellman operator), setting l=0 will lead to minimizing. 
         # Set up the MDP, but don't need to worry about epsilon values
         MDP.__init__(self, transitions, reward, discount, None, max_iter=max_iter,
                      skip_check=skip_check)
