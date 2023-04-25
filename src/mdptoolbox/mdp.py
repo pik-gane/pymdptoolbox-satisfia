@@ -58,10 +58,11 @@ Available classes
 import math as _math
 import time as _time
 
-import numpy as _np
+import numpy as np
 import scipy.sparse as _sp
 
 import util as _util
+import example
 
 _MSG_STOP_MAX_ITER = "Iterating stopped due to maximum number of iterations " \
     "condition."
@@ -226,6 +227,8 @@ class MDP(object):
         self.iter = 0
         # V should be stored as a vector ie shape of (S,) or (1, S)
         self.V = None
+        # M should be stored as a vector ie shape of (S,) or (1, S)
+        self.M = None
         # policy can also be stored as a vector
         self.policy = None
 
@@ -236,8 +239,42 @@ class MDP(object):
             P_repr += repr(self.P[aa]) + "\n"
             R_repr += repr(self.R[aa]) + "\n"
         return(P_repr + "\n" + R_repr)
+
+    def _bellmanOperator(self, V=None):
+        # Apply the Bellman operator on the value function.
+        #
+        # Updates the value function and the Vprev-improving policy.
+        #
+        # Returns: (policy, value), tuple of new policy and its value
+        #
+        # If V hasn't been sent into the method, then we assume to be working
+        # on the objects V attribute
+        if V is None:
+            # this V should be a reference to the data rather than a copy
+            V = self.V
+        else:
+            # make sure the user supplied V is of the right shape
+            try:
+                assert V.shape in ((self.S,), (1, self.S)), "V is not the " \
+                    "right shape (Bellman operator)."
+            except AttributeError:
+                raise TypeError("V must be a numpy array or matrix.")
+        # Looping through each action the the Q-value matrix is calculated.
+        # P and V can be any object that supports indexing, so it is important
+        # that you know they define a valid MDP before calling the
+        # _bellmanOperator method. Otherwise the results will be meaningless.
+        Q = np.empty((self.A, self.S))
+        for aa in range(self.A):
+            Q[aa] = self.R[aa] + self.discount * self.P[aa].dot(V)
+        # Get the policy and value, for now it is being returned but...
+        # Which way is better?
+        # 1. Return, (policy, value)
+        return (Q.argmax(axis=0), Q.max(axis=0))
+        # 2. update self.policy and self.V directly
+        # self.V = Q.max(axis=1)
+        # self.policy = Q.argmax(axis=1)
     
-    def _satisficing(self, V=None):
+    def _satisficing(self, V=None, M=None):
         # Returns: new policy 
         #
         # If V hasn't been sent into the method, then we assume to be working
@@ -252,31 +289,60 @@ class MDP(object):
                     "right shape (Satisficing operator)."
             except AttributeError:
                 raise TypeError("V must be a numpy array or matrix.")
+        
+        # If M hasn't been sent into the method, then we assume to be working
+        # on the objects M attribute
+        if M is None:
+            # this M should be a reference to the data rather than a copy
+            M = self.M
+        else:
+            # make sure the user supplied M is of the right shape
+            try:
+                assert M.shape in ((self.S,), (1, self.S)), "M is not the " \
+                    "right shape (Satisficing operator)."
+            except AttributeError:
+                raise TypeError("M must be a numpy array or matrix.")
+        
         # Looping through each action the the Q-value matrix is calculated.
         # P and V can be any object that supports indexing, so it is important
         # that you know they define a valid MDP before calling the
         # satisficing method. Otherwise the results will be meaningless.
-        Q = _np.empty((self.A, self.S))
-        # Calculate Q matrix
+        Q = np.empty((self.A, self.S))
+        Q_M = np.empty((self.A, self.S))
+        # Calculate Q matrix and 'W' called Q_M.
         for aa in range(self.A):
             Q[aa] = self.R[aa] + self.discount * self.P[aa].dot(V)
+            Q_M[aa] = self.R[aa]**2 + 2*self.discount*self.R[aa] * self.P[aa].dot(V) + self.discount**2 * self.P[aa].dot(M)
         q_target = self.l * Q.max(axis=0) + (1-self.l) * Q.min(axis=0)
         
-        Policy = _np.zeros(self.S)
+        Policy = np.zeros(self.S)
         for state in range(self.S):
             # To avoid sorting the Q function, an array is created that sorts the Q function. 
-            idx_sorted = _np.argsort(Q[:, state])
+            idx_sorted = np.argsort(Q[:, state])
             # Find the index of which the value in the Q function is equal to or larger than q_target. 
-            idx = _np.searchsorted(Q[:, state], q_target[state], side = 'left', sorter = idx_sorted)
-            # If idx is zero, we can not interpolate with smaller values. 
-            if idx == 0:
-                Policy[state] = idx_sorted[idx]
+            idx = np.searchsorted(Q[:, state], q_target[state], side = 'left', sorter = idx_sorted)
+            
+            # Find all occurances of the values closest to q_target. 
+            # If the Q function has a value exactly equal to q_target, there is no need to interpolate between two actions. 
+            # If idx-1<0 it is not possible to iterpolate. 
+            if Q[:, state][idx_sorted][idx] == q_target[state] or (idx-1 < 0):
+                idxs = np.where(Q[:, state] == Q[:, state][idx_sorted][idx])[0]
+                Policy[state] = idxs[np.argmin(Q_M[idxs, state])]
+            # Otherwise, find the Q-value slightly smaller and slightly larger than q_target. 
             else:
-                # Calculate the probability of choosing the action which will lead to the Q-value smaller than q_target.
-                alpha = (Q[:, state][idx_sorted][idx] - q_target[state])/(Q[:, state][idx_sorted][idx] - Q[:, state][idx_sorted][idx-1])
-                rand_ber = _np.random.binomial(1, alpha)
-                # Choose the action which will lead to the Q-value smaller than q_target with probability alpha and the action leading to larger Q-value otherwise.
-                Policy[state] = rand_ber * idx_sorted[idx-1] + (1-rand_ber) * idx_sorted[idx]
+                idx_larger = np.where(Q[:, state] == Q[:, state][idx_sorted][idx])[0]
+                idx_smaller = np.where(Q[:, state] == Q[:, state][idx_sorted][idx-1])[0]
+                actions = []
+                # Calculate all possible interpolations between the found actions. 
+                for i in range(len(idx_smaller)):
+                    for j in range(len(idx_larger)):
+                        alpha = (Q[:, state][idx_larger[j]] - q_target[state])/(Q[:, state][idx_larger[j]] - Q[:, state][idx_smaller[i]])
+                        rand_ber = np.random.binomial(1, alpha)
+                        # Choose the action which will lead to the Q-value smaller than q_target with probability alpha 
+                        # and the action leading to larger Q-value otherwise.
+                        actions.append(rand_ber * idx_smaller[i] + (1-rand_ber) * idx_larger[j])
+                # Choose the action with the smallest variance. 
+                Policy[state] = np.argmin(Q_M[actions, state])
         return Policy.astype(int)
 
     def _computeTransition(self, transition):
@@ -310,7 +376,7 @@ class MDP(object):
         if _sp.issparse(reward):
             raise NotImplementedError
         else:
-            r = _np.array(reward).reshape(self.S)
+            r = np.array(reward).reshape(self.S)
             return tuple(r for a in range(self.A))
 
     def _computeArrayReward(self, reward):
@@ -318,7 +384,7 @@ class MDP(object):
             raise NotImplementedError
         else:
             def func(x):
-                return _np.array(x).reshape(self.S)
+                return np.array(x).reshape(self.S)
 
             return tuple(func(reward[:, a]) for a in range(self.A))
 
@@ -332,7 +398,7 @@ class MDP(object):
         elif _sp.issparse(transition):
             return transition.multiply(reward).sum(1).A.reshape(self.S)
         else:
-            return _np.multiply(transition, reward).sum(1).reshape(self.S)
+            return np.multiply(transition, reward).sum(1).reshape(self.S)
 
     def _startRun(self):
         if self.verbose:
@@ -434,10 +500,10 @@ class FiniteHorizon(MDP):
         # induction
         del self.iter
         # There are value vectors for each time step up to the horizon
-        self.V = _np.zeros((self.S, N + 1))
+        self.V = np.zeros((self.S, N + 1))
         # There are policy vectors for each time step before the horizon, when
         # we reach the horizon we don't need to make decisions anymore.
-        self.policy = _np.empty((self.S, N), dtype=int)
+        self.policy = np.empty((self.S, N), dtype=int)
         # Set the reward for the final transition to h, if specified.
         if h is not None:
             self.V[:, N] = h
@@ -541,10 +607,10 @@ class _LP(MDP):
         # min V / (discount*P-I) * V <= - PR
         # To avoid loop on states, the matrix M is structured following actions
         # M(A*S,S)
-        f = self._cvxmat(_np.ones((self.S, 1)))
-        h = _np.array(self.R).reshape(self.S * self.A, 1, order="F")
+        f = self._cvxmat(np.ones((self.S, 1)))
+        h = np.array(self.R).reshape(self.S * self.A, 1, order="F")
         h = self._cvxmat(h, tc='d')
-        M = _np.zeros((self.A * self.S, self.S))
+        M = np.zeros((self.A * self.S, self.S))
         for aa in range(self.A):
             pos = (aa + 1) * self.S
             M[(pos - self.S):pos, :] = (
@@ -554,7 +620,7 @@ class _LP(MDP):
         # (Octave uses glpk) and perhaps Matlab. If solver=None (ie using the
         # default cvxopt solver) then V agrees with the Octave equivalent
         # only to 10e-8 places. This assumes glpk is installed of course.
-        self.V = _np.array(self._linprog(f, M, -h)['x']).reshape(self.S)
+        self.V = np.array(self._linprog(f, M, -h)['x']).reshape(self.S)
         # apply the Bellman operator
         self.policy, self.V = self._bellmanOperator()
         # update the time spent solving
@@ -629,7 +695,7 @@ class PolicyIteration(MDP):
     def __init__(self, transitions, reward, discount, l=0.5, policy0=None,
                  max_iter = 1000, max_value_iter = 1000, eval_type=0, skip_check=False):
         # Initialise a policy iteration MDP.
-        # Setting l=1 will lead to optimising (Bellman operator), setting l=0 will lead to minimizing. 
+        #
         # Set up the MDP, but don't need to worry about epsilon values
         MDP.__init__(self, transitions, reward, discount, None, max_iter=max_iter,
                      skip_check=skip_check)
@@ -637,13 +703,13 @@ class PolicyIteration(MDP):
         if policy0 is None:
             # Initialise the policy to the one which maximises the expected
             # immediate reward
-            self.policy = _np.zeros(self.S)
+            self.policy = np.zeros(self.S,dtype=np.int32)
             #self.policy, null = self._bellmanOperator(null)
             #del null
         else:
             # Use the policy that the user supplied
             # Make sure it is a numpy array
-            policy0 = _np.array(policy0)
+            policy0 = np.array(policy0)
             # Make sure the policy is the right size and shape
             assert policy0.shape in ((self.S, ), (self.S, 1), (1, self.S)), \
                 "'policy0' must a vector with length S."
@@ -651,12 +717,14 @@ class PolicyIteration(MDP):
             policy0 = policy0.reshape(self.S)
             # The policy can only contain integers between 0 and S-1
             msg = "'policy0' must be a vector of integers between 0 and S-1."
-            assert not _np.mod(policy0, 1).any(), msg
+            assert not np.mod(policy0, 1).any(), msg
             assert (policy0 >= 0).all(), msg
             assert (policy0 < self.S).all(), msg
             self.policy = policy0
         # set the initial values to zero
-        self.V = _np.zeros(self.S)
+        self.V = np.zeros(self.S)
+        # set the initial value of $M(s) = E[G_t^2|s_0 = s]$ to zero.
+        self.M = np.zeros(self.S)
         # Do some setup depending on the evaluation type
         if eval_type in (0, "matrix"):
             self.eval_type = "matrix"
@@ -689,8 +757,11 @@ class PolicyIteration(MDP):
         # Ppolicy(SxS)  = transition matrix for policy
         # PRpolicy(S)   = reward matrix for policy
         #
-        Ppolicy = _np.empty((self.S, self.S))
-        Rpolicy = _np.zeros(self.S)
+        # transitions, reward = example.smallMDP()
+        _, Reward = example.smallMDP()
+        self.R = self._computeReward(Reward, self.P)
+        Ppolicy = np.empty((self.S, self.S))
+        Rpolicy = np.zeros(self.S)
         for aa in range(self.A):  # avoid looping over S
             # the rows that use action a.
             ind = (self.policy == aa).nonzero()[0]
@@ -714,7 +785,7 @@ class PolicyIteration(MDP):
         # self.Rpolicy = Rpolicy
         return (Ppolicy, Rpolicy)
 
-    def _evalPolicyIterative(self, V0=0, epsilon=0.0001):
+    def _evalPolicyIterative(self, V0=0, M0=0, epsilon=0.0001):
         # Evaluate a policy using iteration.
         #
         # Arguments
@@ -748,17 +819,27 @@ class PolicyIteration(MDP):
         try:
             assert V0.shape in ((self.S, ), (self.S, 1), (1, self.S)), \
                 "'V0' must be a vector of length S."
-            policy_V = _np.array(V0).reshape(self.S)
+            policy_V = np.array(V0).reshape(self.S)
         except AttributeError:
             if V0 == 0:
-                policy_V = _np.zeros(self.S)
+                policy_V = np.zeros(self.S)
             else:
-                policy_V = _np.array(V0).reshape(self.S)
+                policy_V = np.array(V0).reshape(self.S)
+                
+        try:
+            assert M0.shape in ((self.S, ), (self.S, 1), (1, self.S)), \
+                "'M0' must be a vector of length S."
+            policy_M = np.array(M0).reshape(self.S)
+        except AttributeError:
+            if M0 == 0:
+                policy_M = np.zeros(self.S)
+            else:
+                policy_M = np.array(M0).reshape(self.S)
 
         policy_P, policy_R = self._computePpolicyPRpolicy()
 
         if self.verbose:
-            _printVerbosity("Iteration", "V variation")
+            _printVerbosity("Iteration", "V variation", "M variation")
 
         
 
@@ -768,8 +849,10 @@ class PolicyIteration(MDP):
             itr += 1
 
             Vprev = policy_V
+            Mprev = policy_M
             policy_V = policy_R + self.discount * policy_P.dot(Vprev)
-            variation = _np.absolute(policy_V - Vprev).max()
+            policy_M = policy_R**2 + 2*self.discount*policy_R * policy_P.dot(policy_V) + self.discount**2 * policy_P.dot(Mprev)
+            variation = max(np.absolute(policy_V - Vprev).max(), np.absolute(policy_M - Mprev).max())
             if self.verbose:
                 _printVerbosity(itr, variation)
 
@@ -784,6 +867,7 @@ class PolicyIteration(MDP):
                     print(_MSG_STOP_MAX_ITER)
 
             self.V = policy_V
+            self.M = policy_M
 
     def _evalPolicyMatrix(self):
         # Evaluate the value function of the policy using linear equations.
@@ -807,7 +891,7 @@ class PolicyIteration(MDP):
         #
         Ppolicy, Rpolicy = self._computePpolicyPRpolicy()
         # V = PR + gPV  => (I-gP)V = PR  => V = inv(I-gP)* PR
-        self.V = _np.linalg.solve(
+        self.V = np.linalg.solve(
             (_sp.eye(self.S, self.S) - self.discount * Ppolicy), Rpolicy)
 
     
@@ -843,7 +927,6 @@ class PolicyIteration(MDP):
                 break
             else:
                 self.policy = policy_next
-
         self._endRun()
 
 
@@ -923,10 +1006,10 @@ class PolicyIterationModified(PolicyIteration):
             self.thresh = self.epsilon
 
         if self.discount == 1:
-            self.V = _np.zeros(self.S)
+            self.V = np.zeros(self.S)
         else:
             Rmin = min(R.min() for R in self.R)
-            self.V = 1 / (1 - self.discount) * Rmin * _np.ones((self.S,))
+            self.V = 1 / (1 - self.discount) * Rmin * np.ones((self.S,))
 
     def run(self):
         # Run the modified policy iteration algorithm.
@@ -1056,7 +1139,7 @@ class QLearning(MDP):
         self.discount = discount
 
         # Initialisations
-        self.Q = _np.zeros((self.S, self.A))
+        self.Q = np.zeros((self.S, self.A))
         self.mean_discrepancy = []
 
     def run(self):
@@ -1066,25 +1149,25 @@ class QLearning(MDP):
         self.time = _time.time()
 
         # initial state choice
-        s = _np.random.randint(0, self.S)
+        s = np.random.randint(0, self.S)
 
         for n in range(1, self.max_iter + 1):
 
             # Reinitialisation of trajectories every 100 transitions
             if (n % 100) == 0:
-                s = _np.random.randint(0, self.S)
+                s = np.random.randint(0, self.S)
 
             # Action choice : greedy with increasing probability
             # probability 1-(1/log(n+2)) can be changed
-            pn = _np.random.random()
+            pn = np.random.random()
             if pn < (1 - (1 / _math.log(n + 2))):
                 # optimal_action = self.Q[s, :].max()
                 a = self.Q[s, :].argmax()
             else:
-                a = _np.random.randint(0, self.A)
+                a = np.random.randint(0, self.A)
 
             # Simulating next state s_new and reward associated to <s,s_new,a>
-            p_s_new = _np.random.random()
+            p_s_new = np.random.random()
             p = 0
             s_new = -1
             while (p < p_s_new) and (s_new < (self.S - 1)):
@@ -1109,11 +1192,11 @@ class QLearning(MDP):
             s = s_new
 
             # Computing and saving maximal values of the Q variation
-            discrepancy.append(_np.absolute(dQ))
+            discrepancy.append(np.absolute(dQ))
 
             # Computing means all over maximal Q variations values
             if len(discrepancy) == 100:
-                self.mean_discrepancy.append(_np.mean(discrepancy))
+                self.mean_discrepancy.append(np.mean(discrepancy))
                 discrepancy = []
 
             # compute the value function and the policy
@@ -1202,7 +1285,7 @@ class RelativeValueIteration(MDP):
         self.epsilon = epsilon
         self.discount = 1
 
-        self.V = _np.zeros(self.S)
+        self.V = np.zeros(self.S)
         self.gain = 0  # self.U[self.S]
 
         self.average_reward = None
@@ -1367,11 +1450,11 @@ class ValueIteration(MDP):
 
         # initialization of optional arguments
         if initial_value == 0:
-            self.V = _np.zeros(self.S)
+            self.V = np.zeros(self.S)
         else:
             assert len(initial_value) == self.S, "The initial value must be " \
                 "a vector of length S."
-            self.V = _np.array(initial_value).reshape(self.S)
+            self.V = np.array(initial_value).reshape(self.S)
         if self.discount < 1:
             # compute a bound for the number of iterations and update the
             # stored value of self.max_iter
@@ -1406,10 +1489,10 @@ class ValueIteration(MDP):
         # k =    max     [1 - S min[ P(j|s,a), p(j|s',a')] ]
         #     s,a,s',a'       j
         k = 0
-        h = _np.zeros(self.S)
+        h = np.zeros(self.S)
 
         for ss in range(self.S):
-            PP = _np.zeros((self.A, self.S))
+            PP = np.zeros((self.A, self.S))
             for aa in range(self.A):
                 try:
                     PP[aa] = self.P[aa][:, ss]
@@ -1528,7 +1611,7 @@ class ValueIterationGS(ValueIteration):
 
         # initialization of optional arguments
         if initial_value == 0:
-            self.V = _np.zeros(self.S)
+            self.V = np.zeros(self.S)
         else:
             if len(initial_value) != self.S:
                 raise ValueError("The initial value must be a vector of "
@@ -1537,7 +1620,7 @@ class ValueIterationGS(ValueIteration):
                 try:
                     self.V = initial_value.reshape(self.S)
                 except AttributeError:
-                    self.V = _np.array(initial_value)
+                    self.V = np.array(initial_value)
                 except:
                     raise
         if self.discount < 1:
@@ -1584,7 +1667,7 @@ class ValueIterationGS(ValueIteration):
 
         self.policy = []
         for s in range(self.S):
-            Q = _np.zeros(self.A)
+            Q = np.zeros(self.A)
             for a in range(self.A):
                 Q[a] = (self.R[a][s] +
                         self.discount * self.P[a][s, :].dot(self.V))
