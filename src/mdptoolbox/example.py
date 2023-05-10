@@ -46,7 +46,7 @@ Available functions
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-import numpy as _np
+import numpy as np
 import scipy.sparse as _sp
 from random import choices
 from random import choice
@@ -54,72 +54,113 @@ from random import choice
 def smallMDP():
     """ Example from email on 15.04.2023
     
-    States: 0: s0; 1: sA; ...
-    Actions: 0: A; 1: B; ...
+    States: 0: s0; 1: sA; ... (8 in total; sDEF is dublicated to include the random reward)
+    Actions: 0: A; 1: B; ... (6 in total)
     Transition probabilities (A x S x S):
     
-        P[0, :, :] =    |0 1 0 0 0 0 0|
-                        |0 1 0 0 0 0 0|
-                        |. . . . . . .|
-                        |0 1 0 0 0 0 0|
+        P[0, :, :] =    |0 1 0 0 0 0 0 0|
+                        |0 1 0 0 0 0 0 0|
+                        |. . . . . . . .|
+                        |0 1 0 0 0 0 0 0|
         
-        P[1, :, :] =    |0 0 1/2 1/2 0 0 0|
-                        |0 0 1/2 1/2 0 0 0|
-                        |. . . . . . . . .|
-                        |0 0 1/2 1/2 0 0 0|
+        P[1, :, :] =    |0 0 1/2 1/2 0 0 0 0|
+                        |0 0 1/2 1/2 0 0 0 0|
+                        |. . . . . . . . . .|
+                        |0 0 1/2 1/2 0 0 0 0|
                         
-        P[2, :, :] =    |0 0 0 0 1/2 1/2 0|
-                        |0 0 0 0 1/2 1/2 0|
-                        |. . . . . . . . .|
-                        |0 0 0 0 1/2 1/2 0|
+        P[2, :, :] =    |0 0 0 0 1/2 1/2 0 0|
+                        |0 0 0 0 1/2 1/2 0 0|
+                        |. . . . . . . . . .|
+                        |0 0 0 0 1/2 1/2 0 0|
                         
-        P[(3, 4, 5), :, :] =    |0 0 0 0 0 0 1|
-                                |0 0 0 0 0 0 1|
-                                |. . . . . . .|
-                                |0 0 0 0 0 0 1|
+        P[(3, 4, 5), :, :] =    |0 0 0 0 0 0 1/2 1/2|
+                                |0 0 0 0 0 0 1/2 1/2|
+                                |. . . . . . . . . .|
+                                |0 0 0 0 0 0 1/2 1/2|
 
                         
-    Reward matrix (S x A):
+    Reward matrix (A x S x S):
     
-        R = | 0  0  0         0        0  0|
-            |18 18 18 (18+36)/2 (9+45)/2 54|
-            | 6  6  6  (6+12)/2 (3+15)/2 18|
-            |18 18 18 (18+36)/2 (9+45)/2 54|
-            | 8  8  8  (8+16)/2 (4+20)/2 24|
-            |16 16 16 (16+32)/2 (8+40)/2 48|
-            | 2  2  2   (2+4)/2  (1+5)/2  6|
+        R[0, :, :] =    |0  0 0 0 0 0 0 0|
+                        |0 18 0 0 0 0 0 0|
+                        |0  6 0 0 0 0 0 0|
+                        |0 18 0 0 0 0 0 0|
+                        |0  8 0 0 0 0 0 0|
+                        |0 16 0 0 0 0 0 0|
+                        |0  2 0 0 0 0 0 0|
+                        |0  2 0 0 0 0 0 0|
+                        
+        R[1, :, :] =    |0 0  0  0 0 0 0 0| (R[2, :, :] is the same except for the two non-zero column who shift to columns to the right)
+                        |0 0 18 18 0 0 0 0|
+                        |0 0  6  6 0 0 0 0|
+                        |0 0 18 18 0 0 0 0|
+                        |0 0  8  8 0 0 0 0|
+                        |0 0 16 16 0 0 0 0|
+                        |0 0  2  2 0 0 0 0|
+                        |0 0  2  2 0 0 0 0|
+                        
+        R[3, :, :] =    |0 0 0 0 0 0  0  0|
+                        |0 0 0 0 0 0 18 36|
+                        |0 0 0 0 0 0  6 12|
+                        |0 0 0 0 0 0 18 36|
+                        |0 0 0 0 0 0  8 16|
+                        |0 0 0 0 0 0 16 32|
+                        |0 0 0 0 0 0  2  4|
+                        |0 0 0 0 0 0  2  4|
+                        
+        R[4, :, :] =    |0 0 0 0 0 0  0  0|
+                        |0 0 0 0 0 0  9 45|
+                        |0 0 0 0 0 0  3 15|
+                        |0 0 0 0 0 0  9 45|
+                        |0 0 0 0 0 0  4 20|
+                        |0 0 0 0 0 0  8 40|
+                        |0 0 0 0 0 0  1  5|
+                        |0 0 0 0 0 0  1  5|
 
-    
+        R[5, :, :] =    |0 0 0 0 0 0  0  0|
+                        |0 0 0 0 0 0 54 54|
+                        |0 0 0 0 0 0 18 18|
+                        |0 0 0 0 0 0 54 54|
+                        |0 0 0 0 0 0 24 24|
+                        |0 0 0 0 0 0 48 48|
+                        |0 0 0 0 0 0  6  6|
+                        |0 0 0 0 0 0  6  6|
+  
     """
-    #Transition probability matrix
-    P = _np.zeros((6, 7, 7))
-    P[0, :, 1] = _np.ones(7)
-    P[1, :, (2, 3)] = 1/2 * _np.ones(7)
-    P[2, :, (4, 5)] = 1/2 * _np.ones(7)
-    P[(3, 4, 5), :, 6] = _np.ones(7)
+    # Transition probability matrix
+    P = np.zeros((6, 8, 8))
+    P[0, :, 1] = np.ones(8)
+    P[1, :, (2, 3)] = 1/2 * np.ones(8)
+    P[2, :, (4, 5)] = 1/2 * np.ones(8)
+    P[(3, 4, 5), :, 6] = 1/2 * np.ones(8)
+    P[(3, 4, 5), :, 7] = 1/2 * np.ones(8)
     
-    #Reward matrix
-    R = _np.zeros((7, 6))
-    sAB9 = _np.array([18, 18, 18, int(choice([18, 36])), int(choice([9, 45])), 54])
-    sB3 = _np.array([6, 6, 6, choice([6, 12]), choice([3, 15]), 18])
-    sC4 = _np.array([8, 8, 8, choice([8, 16]), choice([4, 20]), 24])
-    sC8 = _np.array([16, 16, 16, choice([16, 32]), choice([8, 40]), 48])
-    sDEF = _np.array([2, 2, 2, choice([2, 4]), choice([1, 5]), 6])
+    # Reward matrix
+    R = np.zeros((6, 8, 8))
+    ABC = np.array([0, 18, 6, 18, 8, 16, 2, 2])
+    DSmall = np.array([0, 18, 6, 18, 8, 16, 2, 2])
+    DLarge = np.array([0, 36, 12, 36, 16, 32, 4, 4])
+    ESmall = np.array([0, 9, 3, 9, 4, 8, 1, 1])
+    ELarge = np.array([0, 45, 15, 45, 20, 40, 5, 5])
+    F = np.array([0, 54, 18, 54, 24, 48, 6, 6])
     
-    R[(1, 3), :] = sAB9
-    R[2, :] = sB3
-    R[4, :] = sC4
-    R[5, :] = sC8
-    R[6, :] = sDEF
+    R[0, :, 1] = ABC
+    R[1, :, (2, 3)] = ABC
+    R[2, :, (4, 5)] = ABC
+    R[3, :, 6] = DSmall
+    R[3, :, 7] = DLarge
+    R[4, :, 6] = ESmall
+    R[4, :, 7] = ELarge
+    R[5, :, (6, 7)] = F
     
     return (P, R)
-    
-def Reward_SmallMDP(P, R, policy):
-    # Probability of starting in state 0 with action given by policy[0]. 
-    State = choices(range(len(P[policy[0], 0, :])), P[policy[0], 0, :])[0]
-    return (R[State, policy[State]], State)
 
-    
+def Reward_SmallMDP(P, R, policy):
+    # Resulting state of starting in state 0 with action given by policy[0]. 
+    State = choices(range(len(policy)), P[policy[0], 0, :])[0]
+    # Resulting state of starting in 'State' with action given by policy[State].
+    State_end = choices(range(len(policy)), P[policy[State], State, :])[0]
+    return (R[policy[State], State, State_end], State)
 
 def forest(S=3, r1=4, r2=2, p=0.1, is_sparse=False):
     """Generate a MDP example based on a simple forest management scenario.
@@ -245,16 +286,16 @@ def forest(S=3, r1=4, r2=2, p=0.1, is_sparse=False):
         vals = [1] * S
         P.append(_sp.coo_matrix((vals, (rows, cols)), shape=(S, S)).tocsr())
     else:
-        P = _np.zeros((2, S, S))
-        P[0, :, :] = (1 - p) * _np.diag(_np.ones(S - 1), 1)
+        P = np.zeros((2, S, S))
+        P[0, :, :] = (1 - p) * np.diag(np.ones(S - 1), 1)
         P[0, :, 0] = p
         P[0, S - 1, S - 1] = (1 - p)
-        P[1, :, :] = _np.zeros((S, S))
+        P[1, :, :] = np.zeros((S, S))
         P[1, :, 0] = 1
     # Definition of Reward matrix
-    R = _np.zeros((S, 2))
+    R = np.zeros((S, 2))
     R[S - 1, 0] = r1
-    R[:, 1] = _np.ones(S)
+    R[:, 1] = np.ones(S)
     R[0, 1] = 0
     R[S - 1, 1] = r2
     
@@ -266,15 +307,15 @@ def _randDense(states, actions, mask):
 
     """
     # definition of transition matrix : square stochastic matrix
-    P = _np.zeros((actions, states, states))
+    P = np.zeros((actions, states, states))
     # definition of reward matrix (values between -1 and +1)
-    R = _np.zeros((actions, states, states))
+    R = np.zeros((actions, states, states))
     for action in range(actions):
         for state in range(states):
             # create our own random mask if there is no user supplied one
             if mask is None:
-                m = _np.random.random(states)
-                r = _np.random.random()
+                m = np.random.random(states)
+                r = np.random.random()
                 m[m <= r] = 0
                 m[m > r] = 1
             elif mask.shape == (actions, states, states):
@@ -283,11 +324,11 @@ def _randDense(states, actions, mask):
                 m = mask[state]
             # Make sure that there is atleast one transition in each state
             if m.sum() == 0:
-                m[_np.random.randint(0, states)] = 1
-            P[action][state] = m * _np.random.random(states)
+                m[np.random.randint(0, states)] = 1
+            P[action][state] = m * np.random.random(states)
             P[action][state] = P[action][state] / P[action][state].sum()
-            R[action][state] = (m * (2 * _np.random.random(states) -
-                                _np.ones(states, dtype=int)))
+            R[action][state] = (m * (2 * np.random.random(states) -
+                                np.ones(states, dtype=int)))
     return(P, R)
 
 
@@ -307,7 +348,7 @@ def _randSparse(states, actions, mask):
         RR = _sp.dok_matrix((states, states))
         for state in range(states):
             if mask is None:
-                m = _np.random.random(states)
+                m = np.random.random(states)
                 m[m <= 2/3.0] = 0
                 m[m > 2/3.0] = 1
             elif mask.shape == (actions, states, states):
@@ -316,7 +357,7 @@ def _randSparse(states, actions, mask):
                 m = mask[state]
             n = int(m.sum())  # m[state, :]
             if n == 0:
-                m[_np.random.randint(0, states)] = 1
+                m[np.random.randint(0, states)] = 1
                 n = 1
             # find the columns of the vector that have non-zero elements
             nz = m.nonzero()
@@ -324,9 +365,9 @@ def _randSparse(states, actions, mask):
                 cols = nz[0]
             else:
                 cols = nz[1]
-            vals = _np.random.random(n)
+            vals = np.random.random(n)
             vals = vals / vals.sum()
-            reward = 2*_np.random.random(n) - _np.ones(n)
+            reward = 2*np.random.random(n) - np.ones(n)
             PP[state, cols] = vals
             RR[state, cols] = reward
         # PP.tocsr() takes the same amount of time as PP.tocoo().tocsr()
@@ -471,6 +512,6 @@ def small():
            [-1,  2]])
 
     """
-    P = _np.array([[[0.5, 0.5], [0.8, 0.2]], [[0, 1], [0.1, 0.9]]])
-    R = _np.array([[5, 10], [-1, 2]])
+    P = np.array([[[0.5, 0.5], [0.8, 0.2]], [[0, 1], [0.1, 0.9]]])
+    R = np.array([[5, 10], [-1, 2]])
     return(P, R)
