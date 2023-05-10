@@ -62,7 +62,6 @@ import numpy as np
 import scipy.sparse as _sp
 
 import util as _util
-import example
 
 _MSG_STOP_MAX_ITER = "Iterating stopped due to maximum number of iterations " \
     "condition."
@@ -203,7 +202,6 @@ class MDP(object):
                 "The maximum number of iterations must be greater than 0."
             )
 
-
         # check that epsilon is something sane
         if epsilon is not None:
             self.epsilon = float(epsilon)
@@ -214,7 +212,7 @@ class MDP(object):
             # MDP. If an exception isn't raised then they are assumed to be
             # correct.
             _util.check(transitions, reward)
-
+        
         self.S, self.A = _computeDimensions(transitions)
         self.P = self._computeTransition(transitions)
         self.R = self._computeReward(reward, transitions)
@@ -227,8 +225,6 @@ class MDP(object):
         self.iter = 0
         # V should be stored as a vector ie shape of (S,) or (1, S)
         self.V = None
-        # M should be stored as a vector ie shape of (S,) or (1, S)
-        self.M = None
         # policy can also be stored as a vector
         self.policy = None
 
@@ -240,7 +236,7 @@ class MDP(object):
             R_repr += repr(self.R[aa]) + "\n"
         return(P_repr + "\n" + R_repr)
 
-    def _bellmanOperator(self, V=None):
+    def bellmanOperator(self, V=None):
         # Apply the Bellman operator on the value function.
         #
         # Updates the value function and the Vprev-improving policy.
@@ -262,7 +258,7 @@ class MDP(object):
         # Looping through each action the the Q-value matrix is calculated.
         # P and V can be any object that supports indexing, so it is important
         # that you know they define a valid MDP before calling the
-        # _bellmanOperator method. Otherwise the results will be meaningless.
+        # bellmanOperator method. Otherwise the results will be meaningless.
         Q = np.empty((self.A, self.S))
         for aa in range(self.A):
             Q[aa] = self.R[aa] + self.discount * self.P[aa].dot(V)
@@ -273,9 +269,13 @@ class MDP(object):
         # 2. update self.policy and self.V directly
         # self.V = Q.max(axis=1)
         # self.policy = Q.argmax(axis=1)
-    
-    def _satisficing(self, V=None, M=None):
-        # Returns: new policy 
+
+    def Satisficing(self, V=None):
+        # Apply the satisficing operator on the value function.
+        #
+        # Updates the value function and the Vprev-improving policy.
+        #
+        # Returns: policy
         #
         # If V hasn't been sent into the method, then we assume to be working
         # on the objects V attribute
@@ -289,60 +289,36 @@ class MDP(object):
                     "right shape (Satisficing operator)."
             except AttributeError:
                 raise TypeError("V must be a numpy array or matrix.")
-        
-        # If M hasn't been sent into the method, then we assume to be working
-        # on the objects M attribute
-        if M is None:
-            # this M should be a reference to the data rather than a copy
-            M = self.M
-        else:
-            # make sure the user supplied M is of the right shape
-            try:
-                assert M.shape in ((self.S,), (1, self.S)), "M is not the " \
-                    "right shape (Satisficing operator)."
-            except AttributeError:
-                raise TypeError("M must be a numpy array or matrix.")
-        
         # Looping through each action the the Q-value matrix is calculated.
         # P and V can be any object that supports indexing, so it is important
         # that you know they define a valid MDP before calling the
-        # satisficing method. Otherwise the results will be meaningless.
+        # Satisficing method. Otherwise the results will be meaningless.
         Q = np.empty((self.A, self.S))
-        Q_M = np.empty((self.A, self.S))
-        # Calculate Q matrix and 'W' called Q_M.
+        # Calculate Q matrix
         for aa in range(self.A):
+            # print(str('Q-function') + str(Q[aa]))
+            # print(str('Reward function') + str(self.R[aa]))
+            # print(str('Discount factor') + str(self.discount))
+            # print(str('Transition probability') + str(self.P[aa]))
+            # print(str('Value function') + str(V))
             Q[aa] = self.R[aa] + self.discount * self.P[aa].dot(V)
-            Q_M[aa] = self.R[aa]**2 + 2*self.discount*self.R[aa] * self.P[aa].dot(V) + self.discount**2 * self.P[aa].dot(M)
         q_target = self.l * Q.max(axis=0) + (1-self.l) * Q.min(axis=0)
-        
+
         Policy = np.zeros(self.S)
         for state in range(self.S):
-            # To avoid sorting the Q function, an array is created that sorts the Q function. 
+            # To avoid sorting the Q function, an array is created that sorts the Q function.
             idx_sorted = np.argsort(Q[:, state])
             # Find the index of which the value in the Q function is equal to or larger than q_target. 
             idx = np.searchsorted(Q[:, state], q_target[state], side = 'left', sorter = idx_sorted)
-            
-            # Find all occurances of the values closest to q_target. 
-            # If the Q function has a value exactly equal to q_target, there is no need to interpolate between two actions. 
-            # If idx-1<0 it is not possible to iterpolate. 
-            if Q[:, state][idx_sorted][idx] == q_target[state] or (idx-1 < 0):
-                idxs = np.where(Q[:, state] == Q[:, state][idx_sorted][idx])[0]
-                Policy[state] = idxs[np.argmin(Q_M[idxs, state])]
-            # Otherwise, find the Q-value slightly smaller and slightly larger than q_target. 
+            # If idx is zero, we can not interpolate with smaller values. 
+            if idx == 0:
+                Policy[state] = idx_sorted[idx]
             else:
-                idx_larger = np.where(Q[:, state] == Q[:, state][idx_sorted][idx])[0]
-                idx_smaller = np.where(Q[:, state] == Q[:, state][idx_sorted][idx-1])[0]
-                actions = []
-                # Calculate all possible interpolations between the found actions. 
-                for i in range(len(idx_smaller)):
-                    for j in range(len(idx_larger)):
-                        alpha = (Q[:, state][idx_larger[j]] - q_target[state])/(Q[:, state][idx_larger[j]] - Q[:, state][idx_smaller[i]])
-                        rand_ber = np.random.binomial(1, alpha)
-                        # Choose the action which will lead to the Q-value smaller than q_target with probability alpha 
-                        # and the action leading to larger Q-value otherwise.
-                        actions.append(rand_ber * idx_smaller[i] + (1-rand_ber) * idx_larger[j])
-                # Choose the action with the smallest variance. 
-                Policy[state] = np.argmin(Q_M[actions, state])
+                # Calculate the probability of choosing the action which will lead to the Q-value smaller than q_target.
+                alpha = (Q[:, state][idx_sorted][idx] - q_target[state])/(Q[:, state][idx_sorted][idx] - Q[:, state][idx_sorted][idx-1])
+                rand_ber = np.random.binomial(1, alpha)
+                # Choose the action which will lead to the Q-value smaller than q_target with probability alpha and the action leading to larger Q-value otherwise.
+                Policy[state] = rand_ber * idx_sorted[idx-1] + (1-rand_ber) * idx_sorted[idx]
         return Policy.astype(int)
 
     def _computeTransition(self, transition):
@@ -513,7 +489,7 @@ class FiniteHorizon(MDP):
         self.time = _time.time()
         # loop through each time period
         for n in range(self.N):
-            W, X = self._bellmanOperator(self.V[:, self.N - n])
+            W, X = self.bellmanOperator(self.V[:, self.N - n])
             stage = self.N - n - 1
             self.V[:, stage] = X
             self.policy[:, stage] = W
@@ -622,7 +598,7 @@ class _LP(MDP):
         # only to 10e-8 places. This assumes glpk is installed of course.
         self.V = np.array(self._linprog(f, M, -h)['x']).reshape(self.S)
         # apply the Bellman operator
-        self.policy, self.V = self._bellmanOperator()
+        self.policy, self.V = self.bellmanOperator()
         # update the time spent solving
         self.time = _time.time() - self.time
         # store value and policy as tuples
@@ -650,6 +626,9 @@ class PolicyIteration(MDP):
     max_iter : int, optional
         Maximum number of iterations. See the documentation for the ``MDP``
         class for details. Default is 1000.
+    max_value_iter : int, optional
+        Maximum number of iterations for the calculation of the value function in the iterative calculation method. 
+        Default is 10000. 
     eval_type : int or string, optional
         Type of function used to evaluate policy. 0 or "matrix" to solve as a
         set of linear equations. 1 or "iterative" to solve iteratively.
@@ -658,6 +637,10 @@ class PolicyIteration(MDP):
         By default we run a check on the ``transitions`` and ``rewards``
         arguments to make sure they describe a valid MDP. You can set this
         argument to True in order to skip this check.
+    mode: , optional
+        Default: Bellmann Operator
+    l: float, optional
+        Lambda parameter in Satisficing algorithm.
 
     Data Attributes
     ---------------
@@ -691,21 +674,41 @@ class PolicyIteration(MDP):
     >>> pi.policy
     (0, 0, 0)
     """
-    
-    def __init__(self, transitions, reward, discount, l=0.5, policy0=None,
-                 max_iter = 1000, max_value_iter = 1000, eval_type=0, skip_check=False):
+
+    def __init__(self, transitions, reward, discount, policy0=None,
+                 max_iter=1000, eval_type=0, skip_check=False, mode=0, **options):
+        # Possible option include: max_value_iter, l; these need to be specified by 'max_value_iter = ...' or 'l = ..'.
         # Initialise a policy iteration MDP.
         #
         # Set up the MDP, but don't need to worry about epsilon values
-        MDP.__init__(self, transitions, reward, discount, None, max_iter=max_iter,
+        MDP.__init__(self, transitions, reward, discount, None, max_iter,
                      skip_check=skip_check)
+        # Check the mode
+        if mode in (0, "maximize"):
+            self.mode = "maximize"
+        elif mode in (1, "satisfice"):
+            self.mode = "satisfice"
+            if 'l' in options:
+                self.l = options['l']
+            else:
+                self.l = 0.5
+        else:
+            raise ValueError("'mode' should be '0' for maximizing "
+                             "or '1' for satisficing. The strings "
+                             "'maximize' and 'satisfice' can also be used.")
+        
         # Check if the user has supplied an initial policy. If not make one.
         if policy0 is None:
             # Initialise the policy to the one which maximises the expected
             # immediate reward
-            self.policy = np.zeros(self.S,dtype=np.int32)
-            #self.policy, null = self._bellmanOperator(null)
-            #del null
+            if self.mode == "maximize":
+                null = np.zeros(self.S)
+                self.policy, null = self.bellmanOperator(null)
+                del null
+            elif self.mode == "satisfice":
+                null = np.zeros(self.S)
+                self.policy = self.Satisficing(null)
+                del null
         else:
             # Use the policy that the user supplied
             # Make sure it is a numpy array
@@ -723,8 +726,6 @@ class PolicyIteration(MDP):
             self.policy = policy0
         # set the initial values to zero
         self.V = np.zeros(self.S)
-        # set the initial value of $M(s) = E[G_t^2|s_0 = s]$ to zero.
-        self.M = np.zeros(self.S)
         # Do some setup depending on the evaluation type
         if eval_type in (0, "matrix"):
             self.eval_type = "matrix"
@@ -734,8 +735,12 @@ class PolicyIteration(MDP):
             raise ValueError("'eval_type' should be '0' for matrix evaluation "
                              "or '1' for iterative evaluation. The strings "
                              "'matrix' and 'iterative' can also be used.")
-        self.l = l
-        self.max_value_iter = max_value_iter
+        
+        if 'max_value_iter' in options:
+            self.max_value_iter = options['max_value_iter']
+        else:
+            self.max_value_iter = 10000
+
 
     def _computePpolicyPRpolicy(self):
         # Compute the transition matrix and the reward matrix for a policy.
@@ -757,9 +762,6 @@ class PolicyIteration(MDP):
         # Ppolicy(SxS)  = transition matrix for policy
         # PRpolicy(S)   = reward matrix for policy
         #
-        # transitions, reward = example.smallMDP()
-        _, Reward = example.smallMDP()
-        self.R = self._computeReward(Reward, self.P)
         Ppolicy = np.empty((self.S, self.S))
         Rpolicy = np.zeros(self.S)
         for aa in range(self.A):  # avoid looping over S
@@ -785,7 +787,7 @@ class PolicyIteration(MDP):
         # self.Rpolicy = Rpolicy
         return (Ppolicy, Rpolicy)
 
-    def _evalPolicyIterative(self, V0=0, M0=0, epsilon=0.0001):
+    def _evalPolicyIterative(self, V0=0, epsilon=0.0001):
         # Evaluate a policy using iteration.
         #
         # Arguments
@@ -825,34 +827,20 @@ class PolicyIteration(MDP):
                 policy_V = np.zeros(self.S)
             else:
                 policy_V = np.array(V0).reshape(self.S)
-                
-        try:
-            assert M0.shape in ((self.S, ), (self.S, 1), (1, self.S)), \
-                "'M0' must be a vector of length S."
-            policy_M = np.array(M0).reshape(self.S)
-        except AttributeError:
-            if M0 == 0:
-                policy_M = np.zeros(self.S)
-            else:
-                policy_M = np.array(M0).reshape(self.S)
 
         policy_P, policy_R = self._computePpolicyPRpolicy()
 
         if self.verbose:
-            _printVerbosity("Iteration", "V variation", "M variation")
-
-        
-
+            _printVerbosity("Iteration", "V variation")
         itr = 0
         done = False
         while not done:
             itr += 1
 
             Vprev = policy_V
-            Mprev = policy_M
             policy_V = policy_R + self.discount * policy_P.dot(Vprev)
-            policy_M = policy_R**2 + 2*self.discount*policy_R * policy_P.dot(policy_V) + self.discount**2 * policy_P.dot(Mprev)
-            variation = max(np.absolute(policy_V - Vprev).max(), np.absolute(policy_M - Mprev).max())
+
+            variation = np.absolute(policy_V - Vprev).max()
             if self.verbose:
                 _printVerbosity(itr, variation)
 
@@ -865,9 +853,7 @@ class PolicyIteration(MDP):
                 done = True
                 if self.verbose:
                     print(_MSG_STOP_MAX_ITER)
-
-            self.V = policy_V
-            self.M = policy_M
+        self.V = policy_V
 
     def _evalPolicyMatrix(self):
         # Evaluate the value function of the policy using linear equations.
@@ -894,10 +880,10 @@ class PolicyIteration(MDP):
         self.V = np.linalg.solve(
             (_sp.eye(self.S, self.S) - self.discount * Ppolicy), Rpolicy)
 
-    
     def run(self):
         # Run the policy iteration algorithm.
         self._startRun()
+
         while True:
             self.iter += 1
             # these _evalPolicy* functions will update the classes value
@@ -906,8 +892,13 @@ class PolicyIteration(MDP):
                 self._evalPolicyMatrix()
             elif self.eval_type == "iterative":
                 self._evalPolicyIterative()
-            # This should update the classes policy attribute 
-            policy_next = self._satisficing()
+            # This should update the classes policy attribute but leave the
+            # value alone
+            if self.mode == "maximize":
+                policy_next, _ = self.bellmanOperator()
+            elif self.mode == "satisfice":
+                policy_next = self.Satisficing()
+            
             # calculate in how many places does the old policy disagree with
             # the new policy
             n_different = (policy_next != self.policy).sum()
@@ -923,10 +914,10 @@ class PolicyIteration(MDP):
             elif self.iter == self.max_iter:
                 if self.verbose:
                     print(_MSG_STOP_MAX_ITER)
-                self.policy = policy_next
                 break
             else:
                 self.policy = policy_next
+
         self._endRun()
 
 
@@ -1019,7 +1010,7 @@ class PolicyIterationModified(PolicyIteration):
         while True:
             self.iter += 1
 
-            self.policy, Vnext = self._bellmanOperator()
+            self.policy, Vnext = self.bellmanOperator()
             # [Ppolicy, PRpolicy] = mdp_computePpolicyPRpolicy(P, PR, policy);
 
             variation = _util.getSpan(Vnext - self.V)
@@ -1299,7 +1290,7 @@ class RelativeValueIteration(MDP):
 
             self.iter += 1
 
-            self.policy, Vnext = self._bellmanOperator()
+            self.policy, Vnext = self.bellmanOperator()
             Vnext = Vnext - self.gain
 
             variation = _util.getSpan(Vnext - self.V)
@@ -1503,7 +1494,7 @@ class ValueIteration(MDP):
 
         k = 1 - h.sum()
         Vprev = self.V
-        null, value = self._bellmanOperator()
+        null, value = self.bellmanOperator()
         # p 201, Proposition 6.6.5
         span = _util.getSpan(value - Vprev)
         max_iter = (_math.log((epsilon * (1 - self.discount) / self.discount) /
@@ -1522,7 +1513,7 @@ class ValueIteration(MDP):
             Vprev = self.V.copy()
 
             # Bellman Operator: compute policy and value functions
-            self.policy, self.V = self._bellmanOperator()
+            self.policy, self.V = self.bellmanOperator()
 
             # The values, based on Q. For the function "max()": the option
             # "axis" means the axis along which to operate. In this case it
