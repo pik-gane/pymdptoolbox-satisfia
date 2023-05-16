@@ -61,6 +61,8 @@ import time as _time
 import numpy as np
 import scipy.sparse as _sp
 
+from scipy.optimize import minimize, LinearConstraint
+
 import util as _util
 
 _MSG_STOP_MAX_ITER = "Iterating stopped due to maximum number of iterations " \
@@ -71,6 +73,9 @@ _MSG_STOP_EPSILON_OPTIMAL_VALUE = "Iterating stopped, epsilon-optimal value " \
     "function found."
 _MSG_STOP_UNCHANGING_POLICY = "Iterating stopped, unchanging policy found."
 
+def ExpectedG(x, G, ss):
+    # This function calculates the expected Q-value. This function will be minimized in the SatisficingMinVar method.
+    return x @ G[:, ss]
 
 def _computeDimensions(transition):
     A = len(transition)
@@ -225,6 +230,12 @@ class MDP(object):
         self.iter = 0
         # V should be stored as a vector ie shape of (S,) or (1, S)
         self.V = None
+        # W should be stored as a vector ie shape of (S,) or (1, S)
+        self.W = None
+        # Q should be stored as a matrix ie shape of (A, S)
+        self.Q = None
+        # G should be stored as a matrix ie shape of (A, S)
+        self.G = None
         # policy can also be stored as a vector
         self.policy = None
 
@@ -296,11 +307,6 @@ class MDP(object):
         Q = np.empty((self.A, self.S))
         # Calculate Q matrix
         for aa in range(self.A):
-            # print(str('Q-function') + str(Q[aa]))
-            # print(str('Reward function') + str(self.R[aa]))
-            # print(str('Discount factor') + str(self.discount))
-            # print(str('Transition probability') + str(self.P[aa]))
-            # print(str('Value function') + str(V))
             Q[aa] = self.R[aa] + self.discount * self.P[aa].dot(V)
         q_target = self.l * Q.max(axis=0) + (1-self.l) * Q.min(axis=0)
 
@@ -320,6 +326,68 @@ class MDP(object):
                 # Choose the action which will lead to the Q-value smaller than q_target with probability alpha and the action leading to larger Q-value otherwise.
                 Policy[state] = rand_ber * idx_sorted[idx-1] + (1-rand_ber) * idx_sorted[idx]
         return Policy.astype(int)
+
+    def SatisficingMinVar(self, V=None, W=None):
+        # Apply the satisficing operator on the value function.
+        #
+        # Updates the value function and the Vprev-improving policy.
+        #
+        # Returns: policy
+        #
+        # If V hasn't been sent into the method, then we assume to be working
+        # on the objects V attribute
+        if V is None:
+            # this V should be a reference to the data rather than a copy
+            V = self.V
+        else:
+            # make sure the user supplied V is of the right shape
+            try:
+                assert V.shape in ((self.S,), (1, self.S)), "V is not the " \
+                    "right shape (Satisficing operator)."
+            except AttributeError:
+                raise TypeError("V must be a numpy array or matrix.")
+        
+        # If W hasn't been sent into the method, then we assume to be working
+        # on the objects W attribute
+        if W is None:
+            # this V should be a reference to the data rather than a copy
+            W = self.W
+        else:
+            # make sure the user supplied V is of the right shape
+            try:
+                assert W.shape in ((self.S,), (1, self.S)), "W is not the " \
+                    "right shape (SatisficingMinVar operator)."
+            except AttributeError:
+                raise TypeError("W must be a numpy array or matrix.")
+        # Looping through each action the the Q-value matrix and G-value matrix are calculated.
+        # P and V can be any object that supports indexing, so it is important
+        # that you know they define a valid MDP before calling the
+        # Satisficing method. Otherwise the results will be meaningless.
+        Q = np.empty((self.A, self.S))
+        G = np.empty((self.A, self.S))
+        # Calculate Q matrix and G matrix
+        for aa in range(self.A):
+            Q[aa] = self.R[aa] + self.discount * self.P[aa].dot(V)
+            G[aa] = self.R[aa]**2 + 2*self.discount*self.R[aa] * self.P[aa].dot(V) + self.discount**2 * self.P[aa].dot(W)
+        self.Q = Q
+        self.G = G
+        V_target = self.l * self.Q.max(axis=0) + (1-self.l) * self.Q.min(axis=0)
+        
+        Policy0 = self.policy
+        Policy = np.zeros((self.S, self.A))
+
+        #For exery state find the argmin of the expected variance while the expected value function is equal to V_target. 
+        for ss in range(self.S):
+            # The sum of the solution should be equal to 1 and the solution * Q should be equal to V_target. 
+            cons = [{'type': 'eq', 'fun': lambda x:  x @ Q[:, ss].reshape((self.A, 1)) - V_target[ss]},
+                    {'type': 'eq', 'fun': lambda x: np.ones((1, self.A)) @ x - 1}]
+            bounds = [(0, 1) for aa in range(self.A)]
+            result = minimize(ExpectedG, x0 = Policy0[ss, :], args=(G, ss,), method='trust-constr', constraints=cons, bounds=bounds)
+            Policy[ss, :] = result.x
+            # Print the results is the solution is not found. 
+            if result.success == False:
+                print(result)
+        return Policy
 
     def _computeTransition(self, transition):
         return tuple(transition[a] for a in range(self.A))
@@ -632,6 +700,7 @@ class PolicyIteration(MDP):
     eval_type : int or string, optional
         Type of function used to evaluate policy. 0 or "matrix" to solve as a
         set of linear equations. 1 or "iterative" to solve iteratively.
+        Type will always be iterative if the satisficing algorithm that minimizes the variance is chosen. 
         Default: 0.
     skip_check : bool
         By default we run a check on the ``transitions`` and ``rewards``
@@ -640,7 +709,7 @@ class PolicyIteration(MDP):
     mode: , optional
         Default: Bellmann Operator
     l: float, optional
-        Lambda parameter in Satisficing algorithm.
+        Lambda parameter in Satisficing or SatisficingMinVar algorithm.
 
     Data Attributes
     ---------------
@@ -692,10 +761,20 @@ class PolicyIteration(MDP):
                 self.l = options['l']
             else:
                 self.l = 0.5
+        elif mode in (2, "SatisficeMinVar"):
+            self.mode = "SatisficeMinVar"
+            # set the initial values to zero
+            self.W = np.zeros(self.S)
+            self.Q = np.zeros((self.A, self.S))
+            self.G = np.zeros((self.A, self.S))
+            if 'l' in options:
+                self.l = options['l']
+            else:
+                self.l = 0.5
         else:
-            raise ValueError("'mode' should be '0' for maximizing "
-                             "or '1' for satisficing. The strings "
-                             "'maximize' and 'satisfice' can also be used.")
+            raise ValueError("'mode' should be '0' for maximizing, "
+                             " '1' for satisficing or '2' for satisficing while minimizing the variance. The strings "
+                             "'maximize', 'satisfice' and 'SatisficeMinVar' can also be used.")
         
         # Check if the user has supplied an initial policy. If not make one.
         if policy0 is None:
@@ -709,37 +788,56 @@ class PolicyIteration(MDP):
                 null = np.zeros(self.S)
                 self.policy = self.Satisficing(null)
                 del null
+            elif self.mode == "SatisficeMinVar":
+                self.policy = np.zeros((self.S, self.A))
+                null = np.zeros(self.S)
+                self.policy = self.SatisficingMinVar(null, null)
+                del null
         else:
             # Use the policy that the user supplied
             # Make sure it is a numpy array
             policy0 = np.array(policy0)
             # Make sure the policy is the right size and shape
-            assert policy0.shape in ((self.S, ), (self.S, 1), (1, self.S)), \
-                "'policy0' must a vector with length S."
-            # reshape the policy to be a vector
-            policy0 = policy0.reshape(self.S)
-            # The policy can only contain integers between 0 and S-1
-            msg = "'policy0' must be a vector of integers between 0 and S-1."
-            assert not np.mod(policy0, 1).any(), msg
-            assert (policy0 >= 0).all(), msg
-            assert (policy0 < self.S).all(), msg
-            self.policy = policy0
+            if self.mode == "SatisficeMinVar":
+                assert policy0.shape in ((self.S, self.A), (self.A, self.S)), \
+                    "'policy0' must a matrix with dimensions SxA."
+                # reshape the policy to be a matrix
+                policy0 = policy0.reshape(self.S, self.A)
+                # The policy can only contain integers between 0 and S-1
+                msg = "'policy0' must be a vector of floats between 0 and 1."
+                assert (policy0 >= 0).all(), msg
+                assert (policy0 <= 1).all(), msg
+                self.policy = policy0
+            else:
+                assert policy0.shape in ((self.S, ), (self.S, 1), (1, self.S)), \
+                    "'policy0' must a vector with length S."
+                # reshape the policy to be a vector
+                policy0 = policy0.reshape(self.S)
+                # The policy can only contain integers between 0 and S-1
+                msg = "'policy0' must be a vector of integers between 0 and S-1."
+                assert not np.mod(policy0, 1).any(), msg
+                assert (policy0 >= 0).all(), msg
+                assert (policy0 < self.S).all(), msg
+                self.policy = policy0
         # set the initial values to zero
         self.V = np.zeros(self.S)
         # Do some setup depending on the evaluation type
         if eval_type in (0, "matrix"):
             self.eval_type = "matrix"
+            if self.mode == "SatisficeMinVar":
+                self.eval_type = "iterative"
         elif eval_type in (1, "iterative"):
             self.eval_type = "iterative"
+            if 'max_value_iter' in options:
+                self.max_value_iter = options['max_value_iter']
+            else:
+                self.max_value_iter = 10000
         else:
             raise ValueError("'eval_type' should be '0' for matrix evaluation "
                              "or '1' for iterative evaluation. The strings "
                              "'matrix' and 'iterative' can also be used.")
         
-        if 'max_value_iter' in options:
-            self.max_value_iter = options['max_value_iter']
-        else:
-            self.max_value_iter = 10000
+
 
 
     def _computePpolicyPRpolicy(self):
@@ -786,8 +884,8 @@ class PolicyIteration(MDP):
         # self.Ppolicy = Ppolicy
         # self.Rpolicy = Rpolicy
         return (Ppolicy, Rpolicy)
-
-    def _evalPolicyIterative(self, V0=0, epsilon=0.0001):
+    
+    def _evalPolicyIterative(self, V0=0, W0=0, epsilon=0.0001):
         # Evaluate a policy using iteration.
         #
         # Arguments
@@ -832,15 +930,124 @@ class PolicyIteration(MDP):
 
         if self.verbose:
             _printVerbosity("Iteration", "V variation")
+            
+        try:
+            assert W0.shape in ((self.S, ), (self.S, 1), (1, self.S)), \
+                "'W0' must be a vector of length S."
+            policy_W = np.array(W0).reshape(self.S)
+        except AttributeError:
+            if W0 == 0:
+                policy_W = np.zeros(self.S)
+            else:
+                policy_W = np.array(W0).reshape(self.S)
+
+        policy_P, policy_R = self._computePpolicyPRpolicy()
+
+        if self.verbose:
+            _printVerbosity("Iteration", "V variation")
+
+        
+
         itr = 0
         done = False
         while not done:
             itr += 1
 
             Vprev = policy_V
+            Wprev = policy_W
             policy_V = policy_R + self.discount * policy_P.dot(Vprev)
+            policy_W = policy_R**2 + 2*self.discount*policy_R * policy_P.dot(policy_V) + self.discount**2 * policy_P.dot(Wprev)
+            variation = max(np.absolute(policy_V - Vprev).max(), np.absolute(policy_W - Wprev).max())
+            if self.verbose:
+                _printVerbosity(itr, variation)
 
-            variation = np.absolute(policy_V - Vprev).max()
+            # ensure |Vn - Vpolicy| < epsilon
+            if variation < ((1 - self.discount) / self.discount) * epsilon:
+                done = True
+                if self.verbose:
+                    print(_MSG_STOP_EPSILON_OPTIMAL_VALUE)
+            elif itr == self.max_value_iter:
+                done = True
+                if self.verbose:
+                    print(_MSG_STOP_MAX_ITER)
+
+            self.V = policy_V
+            self.W = policy_W
+        
+    def _evalMatrixPolicyIterative(self, V0=0, W0=0, epsilon=0.0001):
+        # Evaluate a matrix policy using iteration. This algorithm also calculates the variance of the value function
+        #
+        # Arguments
+        # ---------
+        # Let S = number of states, A = number of actions
+        # P(SxSxA)  = transition matrix
+        #    P could be an array with 3 dimensions or
+        #    a cell array (1xS), each cell containing a matrix possibly sparse
+        # R(SxSxA) or (SxA) = reward matrix
+        #    R could be an array with 3 dimensions (SxSxA) or
+        #    a cell array (1xA), each cell containing a sparse matrix (SxS) or
+        #    a 2D array(SxA) possibly sparse
+        # discount  = discount rate in ]0; 1[
+        # policy(S, A) = a policy
+        # V0(S)     = starting value function, optional (default : zeros(S,1))
+        # W0(S)     = starting variance of value function, optional (default : zeros(S,1))
+        # epsilon   = epsilon-optimal policy search, upper than 0,
+        #    optional (default : 0.0001)
+        # max_iter  = maximum number of iteration to be done, upper than 0,
+        #    optional (default : 10000)
+        #
+        # Evaluation
+        # ----------
+        # Vpolicy(S) = value function, associated to a specific policy
+        # Wpolicy(S) = variance of value function, associated to a specific policy
+        #
+        # Notes
+        # -----
+        # In verbose mode, at each iteration, displays the condition which
+        # stopped iterations: epsilon-optimum value function found or maximum
+        # number of iterations reached.
+        #
+        try:
+            assert V0.shape in ((self.S, ), (self.S, 1), (1, self.S)), \
+                "'V0' must be a vector of length S."
+            policy_V = np.array(V0).reshape(self.S)
+        except AttributeError:
+            if V0 == 0:
+                policy_V = np.zeros(self.S)
+            else:
+                policy_V = np.array(V0).reshape(self.S)
+
+        try:
+            assert W0.shape in ((self.S, ), (self.S, 1), (1, self.S)), \
+                "'W0' must be a vector of length S."
+            policy_V = np.array(W0).reshape(self.S)
+        except AttributeError:
+            if W0 == 0:
+                policy_W = np.zeros(self.S)
+            else:
+                policy_W = np.array(W0).reshape(self.S)
+
+        if self.verbose:
+            _printVerbosity("Iteration", "V variation")
+        itr = 0
+        done = False
+        while not done:
+            itr += 1
+
+            Vprev = policy_V
+            Wprev = policy_W
+            
+            policy_V_matrix = np.zeros((self.A, self.S))
+            policy_W_matrix = np.zeros((self.A, self.S))
+            
+            for aa in range(self.A):
+                policy_V_matrix[aa, :] = self.policy[:, aa] * (self.R[aa] + self.discount * self.P[aa].dot(Vprev))
+                policy_W_matrix[aa, :] = self.policy[:, aa] * (self.R[aa]**2 + 2*self.discount*self.R[aa] * self.P[aa].dot(Vprev) + self.discount**2 * self.P[aa].dot(Wprev))
+            
+            policy_V = np.sum(policy_V_matrix, axis=0)
+            policy_W = np.sum(policy_W_matrix, axis=0)
+                        
+            variation = max(np.absolute(policy_V - Vprev).max(), np.absolute(policy_W - Wprev).max())
             if self.verbose:
                 _printVerbosity(itr, variation)
 
@@ -854,6 +1061,7 @@ class PolicyIteration(MDP):
                 if self.verbose:
                     print(_MSG_STOP_MAX_ITER)
         self.V = policy_V
+        self.W = policy_W
 
     def _evalPolicyMatrix(self):
         # Evaluate the value function of the policy using linear equations.
@@ -886,18 +1094,27 @@ class PolicyIteration(MDP):
 
         while True:
             self.iter += 1
-            # these _evalPolicy* functions will update the classes value
-            # attribute
-            if self.eval_type == "matrix":
-                self._evalPolicyMatrix()
-            elif self.eval_type == "iterative":
-                self._evalPolicyIterative()
             # This should update the classes policy attribute but leave the
             # value alone
             if self.mode == "maximize":
+                # these _evalPolicy* functions will update the classes value
+                # attribute
+                if self.eval_type == "matrix":
+                    self._evalPolicyMatrix()
+                elif self.eval_type == "iterative":
+                    self._evalPolicyIterative()
                 policy_next, _ = self.bellmanOperator()
             elif self.mode == "satisfice":
+                # these _evalPolicy* functions will update the classes value
+                # attribute
+                if self.eval_type == "matrix":
+                    self._evalPolicyMatrix()
+                elif self.eval_type == "iterative":
+                    self._evalPolicyIterative()
                 policy_next = self.Satisficing()
+            elif self.mode == "SatisficeMinVar":
+                self._evalMatrixPolicyIterative()
+                policy_next = self.SatisficingMinVar()
             
             # calculate in how many places does the old policy disagree with
             # the new policy
@@ -917,7 +1134,6 @@ class PolicyIteration(MDP):
                 break
             else:
                 self.policy = policy_next
-
         self._endRun()
 
 
