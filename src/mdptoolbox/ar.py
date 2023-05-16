@@ -24,6 +24,10 @@ def _printVerbosity(iteration, variation):
 class ARTree(MDP):
     """Aspiration Rescaling (AR) algorithm for discounted tree-shaped MDPs"""
 
+    isTerminal = None
+    """(1d array of bools) Whether each state is terminal"""
+    ERsquared = None
+    """(1d array) Expected squared reward for each state"""
     s0 = None
     """Initial state"""
     aleph0 = None
@@ -54,7 +58,7 @@ class ARTree(MDP):
         MDP.__init__(self, **kwargs)
 
         if ERsquared is None:
-            ERsquared = self.R**2
+            ERsquared = tuple(Ra**2 for Ra in self.R)
 
         # TODO: verify that the MDP is a tree?
 
@@ -62,6 +66,7 @@ class ARTree(MDP):
         self.isTerminal = isTerminal
         self.aleph0 = aleph0
         self.mode = mode
+        self.ERsquared = ERsquared
 
         if self.discount < 1:
             # compute a bound for the number of iterations and update the
