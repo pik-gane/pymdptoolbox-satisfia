@@ -79,20 +79,15 @@ class ARTree(MDP):
     def run(self):
         self._startRun()
 
-        # initialize Q somehow
-        # repeatedly pass forward from s0, updating Q and aleph
-        # in each state, compute the stochastic policy, 
-        # update the aleph of all possible successor states
-        # and update the Q values of all possible predecessor states
-        # finally compute and store the stochastic policy
-
+        # shortcuts:
         P = self.P
         R = self.R
-        ERsquared_sa = self.ERsquared
+        ERsquared = self.ERsquared
         gamma = self.discount
         s0 = self.s0
         ones = np.ones(self.A)
 
+        # initialize:
         V = np.zeros(self.S)
         W = np.zeros(self.S)
         Q = np.zeros((self.S, self.A))
@@ -101,6 +96,7 @@ class ARTree(MDP):
         aleph[s0] = self.aleph0
         stochasticPolicy = np.zeros((self.S, self.A))
 
+        # main loop over versions of V, W, Q, G, and aleph:
         converged = False
         while not converged:
             # compute quantities derived from current Q:
@@ -115,6 +111,7 @@ class ARTree(MDP):
             Wnext = W.copy()
             Qnext = Q.copy()
             Gnext = G.copy()
+            # inner loop over states, in order of occurrence in the tree:
             while len(stack) > 0 and nStatesVisited < self.S:
                 s = stack.pop()
                 nStatesVisited += 1
@@ -127,6 +124,7 @@ class ARTree(MDP):
                     Vtarget_s = max(min(aleph_s, Vtop[s]), Vbottom[s])
                     sP = np.zeros(self.A)
                     fallback = False
+                    # compute stochastic policy depending on mode:
                     if self.mode == "minW":
                         # find a minimum-expected-G mix of actions with correct expected Q:
                         res = linprog(G_s, A_eq=[Q_s,ones], b_eq=[Vtarget_s,1], bounds=(0,1), 
