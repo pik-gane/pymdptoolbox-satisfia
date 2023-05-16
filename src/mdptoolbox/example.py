@@ -156,11 +156,21 @@ def smallMDP():
     return (P, R)
 
 def Reward_SmallMDP(P, R, policy):
-    # Resulting state of starting in state 0 with action given by policy[0]. 
-    State = choices(range(len(policy)), P[policy[0], 0, :])[0]
-    # Resulting state of starting in 'State' with action given by policy[State].
-    State_end = choices(range(len(policy)), P[policy[State], State, :])[0]
-    return (R[policy[State], State, State_end], State)
+    # P and R are the matrices defined in the SmallMDP example, NOT self.P en self.R that follow from the pymdptoolbox algorithms. 
+    if type(policy[0]) in (int, float):
+        # Possible states to be after taking the first action from state 0 (or s0). 
+        PossibleStates = np.nonzero(P[policy[0], 0, :])
+        # Provided transition probabilities are equally distributed among the number of options. 
+        Reward = R[np.array(policy)[PossibleStates], PossibleStates, :]
+        return np.average(Reward[Reward != 0])
+    elif type(policy[0]) in (list, np.ndarray):
+        # Calculate the weights for a weighted average of the reward.
+        weight = np.zeros((len(policy[0]), len(policy), len(policy)))
+        for aa in range(len(policy[0])):
+            for ss in range(len(policy)):
+                # Calculate the probability of starting in s0 and taking an action to arrive in state ss. Then take action aa from state ss. 
+                weight[aa, ss, :] = np.array(policy[0]) @ P[:, 0, ss] * np.array(policy[ss])[aa] * P[aa, ss, :]
+        return np.average(R, weights=weight)
 
 def forest(S=3, r1=4, r2=2, p=0.1, is_sparse=False):
     """Generate a MDP example based on a simple forest management scenario.
