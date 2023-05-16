@@ -80,3 +80,4 @@ http://www.inra.fr/mia/T/MDPtoolbox/.
 # POSSIBILITY OF SUCH DAMAGE.
 
 from . import mdp
+from .ar import *

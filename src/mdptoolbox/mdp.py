@@ -61,7 +61,7 @@ import time as _time
 import numpy as np
 import scipy.sparse as _sp
 
-import util as _util
+from . import util as _util
 
 _MSG_STOP_MAX_ITER = "Iterating stopped due to maximum number of iterations " \
     "condition."
@@ -244,7 +244,7 @@ class MDP(object):
         # Returns: (policy, value), tuple of new policy and its value
         #
         # If V hasn't been sent into the method, then we assume to be working
-        # on the objects V attribute
+        # on the object's V attribute
         if V is None:
             # this V should be a reference to the data rather than a copy
             V = self.V
@@ -255,7 +255,7 @@ class MDP(object):
                     "right shape (Bellman operator)."
             except AttributeError:
                 raise TypeError("V must be a numpy array or matrix.")
-        # Looping through each action the the Q-value matrix is calculated.
+        # Looping through each action, the Q-value matrix is calculated.
         # P and V can be any object that supports indexing, so it is important
         # that you know they define a valid MDP before calling the
         # bellmanOperator method. Otherwise the results will be meaningless.
@@ -507,7 +507,7 @@ class FiniteHorizon(MDP):
 
 class _LP(MDP):
 
-    """A discounted MDP soloved using linear programming.
+    """A discounted MDP solved using linear programming.
 
     This class requires the Python ``cvxopt`` module to be installed.
 
