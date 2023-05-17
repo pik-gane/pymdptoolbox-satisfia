@@ -179,8 +179,8 @@ class ARTree(MDP):
                         if self.verbose:
                             print(f"    a {a:2d} R {ER_sa:5.2f} Qbot {Qbottom_sa:5.2f} Qtop {Qtop_sa:5.2f} q {Q_sa_or_aleph_s:5.2f} l {l:5.2f} al",aleph[successors])
                     # recalculate V and W for this state based on the updated Q and G:
-                    Vnext[s] = sP_s.dot(Qnext[s,:])
-                    Wnext[s] = sP_s.dot(Gnext[s,:])
+                    Vnext[s] = (V[s] + sP_s.dot(Qnext[s,:])) / 2
+                    Wnext[s] = (W[s] + sP_s.dot(Gnext[s,:])) / 2
                     if self.verbose: 
                         print(f"               new Q",Qnext[s,:],f"V {Vnext[s]:5.2f}")
 
@@ -217,7 +217,7 @@ class ARTree(MDP):
         self._endRun()
         self.policy = None  # policy is stochastic, so we don't store a deterministic policy!
 
-        assert V[0] == self.aleph0, "V[0] != aleph0"
+        assert abs(V[0] - self.aleph0) < self.epsilon, "V[0] != aleph0"
 
 """
 POSSIBLE CYCLIC BEHAVIOUR:
