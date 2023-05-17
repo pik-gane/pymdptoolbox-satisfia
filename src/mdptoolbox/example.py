@@ -612,3 +612,35 @@ def conjunctive():
         ])
     isTerminal = np.array([0,0,0,0,1,1,1,1,1,1,1,1,1])
     return P, R, isTerminal
+
+def randomTree(A,branches,depth):
+    S = sum((A*branches)**k for k in range(depth+1))
+    P = tuple(np.zeros((S,S)) for a in range(A))
+    R = tuple(np.zeros((S,S)) for a in range(A))
+    ERsquared = tuple(np.zeros((S,S)) for a in range(A))
+    isTerminal = np.zeros(S)
+    isTerminal[0] = 1
+    nTotalStates = 1
+    nCurrentLeaves = 1
+    for i in range(depth):
+        lastNTotalStates = nTotalStates
+        for s in range(nTotalStates-nCurrentLeaves,nTotalStates):
+            isTerminal[s] = 0
+            for a in range(A):
+                probs = np.random.rand(branches)
+                probs /= np.sum(probs)              
+                for b in range(branches):
+                    sPrime = nTotalStates
+                    nTotalStates += 1
+                    P[a][s,sPrime] = probs[b]
+                    r1,r2 = np.random.normal(0,1,2)
+                    R[a][s,sPrime] = (r1 + r2) / 2
+                    ERsquared[a][s,sPrime] = (r1**2 + r2**2) / 2
+                    isTerminal[sPrime] = 1
+        nCurrentLeaves = nTotalStates - lastNTotalStates    
+    for s in range(nTotalStates-nCurrentLeaves,nTotalStates):
+        for a in range(A):
+            P[a][s,s] = 1
+            R[a][s,s] = 0
+            ERsquared[a][s,s] = 0
+    return P, R, ERsquared, isTerminal

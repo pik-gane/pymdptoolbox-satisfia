@@ -20,6 +20,7 @@ def _printVerbosity(iteration, variation):
     else:
         print("{:>10}{:>12}".format(iteration, variation))
 
+np.set_printoptions(suppress=True, formatter={'all': lambda x: f"{x:5.2f}"})
 
 class ARTree(MDP):
     """Aspiration Rescaling (AR) algorithm for discounted tree-shaped MDPs"""
@@ -46,6 +47,7 @@ class ARTree(MDP):
 
     def __init__(self, 
                  isTerminal=None, # whether each state is terminal
+                 reward=None, # expected reward for each state
                  ERsquared=None, # expected squared reward for each state. If None, use R**2
                  s0=None, aleph0=None, mode="minW", 
                  **kwargs):
@@ -55,10 +57,10 @@ class ARTree(MDP):
         assert aleph0 is not None, "Initial aspiration level aleph0 must be specified"
         assert isTerminal is not None, "isTerminal (1d array of bools) must be specified"
 
-        MDP.__init__(self, **kwargs)
+        MDP.__init__(self, reward=reward, **kwargs)
 
         if ERsquared is None:
-            ERsquared = tuple(Ra**2 for Ra in self.R)
+            ERsquared = tuple(Ra**2 for Ra in reward)
 
         # TODO: verify that the MDP is a tree?
 
@@ -82,12 +84,13 @@ class ARTree(MDP):
 
 
     def run(self):
+        self.setVerbose()
         self._startRun()
 
         # shortcuts:
         P = self.P
-        R = self.R
-        ERsquared = self.ERsquared
+        ER = self.R  # expected reward conditional on state, action, next state
+        ERsquared = self.ERsquared  # expected squared reward conditional on state, action, next state
         gamma = self.discount
         s0 = self.s0
         ones = np.ones(self.A)
@@ -104,6 +107,7 @@ class ARTree(MDP):
         # main loop over versions of V, W, Q, G, and aleph:
         converged = False
         while not converged:
+            if self.verbose: print(f"new iteration")
             # compute quantities derived from current Q:
             Vbottom = Q.min(axis=1)
             Vtop = Q.max(axis=1)
@@ -127,15 +131,16 @@ class ARTree(MDP):
                     aleph_s = aleph[s]
                     # set target V based on aleph and bounds:
                     Vtarget_s = max(min(aleph_s, Vtop[s]), Vbottom[s])
-                    sP = np.zeros(self.A)
+                    sP_s = np.zeros(self.A)
                     fallback = False
                     # compute stochastic policy depending on mode:
                     if self.mode == "minW":
                         # find a minimum-expected-G mix of actions with correct expected Q:
                         res = linprog(G_s, A_eq=[Q_s,ones], b_eq=[Vtarget_s,1], bounds=(0,1), 
-                                      options={'cholesky':False, 'sym_pos':False})
+                                      options={'cholesky':False, 'sym_pos':False, 'lstsq':True, 'presolve':True})
+                        assert res.success, f"linprog failed: {res.message}"
                         if res.success:
-                            sP = res.x
+                            sP_s = res.x
                         else:
                             fallback = True
                     if self.mode == "closest" or fallback:
@@ -143,37 +148,44 @@ class ARTree(MDP):
                         aLow = (Q_s - BIG*(Q_s > Vtarget_s)).argmax()
                         aHigh = (Q_s + BIG*(Q_s < Vtarget_s)).argmin()
                         if aLow == aHigh:
-                            sP[aLow] = 1
+                            sP_s[aLow] = 1
                         else:
-                            pLow = (Vtarget_s - Q_s[aLow]) / (Q_s[aHigh] - Q_s[aLow])
-                            pHigh = 1 - pLow
-                            sP[aLow] = pLow
-                            sP[aHigh] = pHigh
-                    print("s",s,"aleph",aleph_s,"Vtarget",Vtarget_s,"Q",Q_s,"sP",sP)
+                            pHigh = (Vtarget_s - Q_s[aLow]) / (Q_s[aHigh] - Q_s[aLow])
+                            pLow = 1 - pHigh
+                            sP_s[aLow] = pLow
+                            sP_s[aHigh] = pHigh
+                    stochasticPolicy[s,:] = sP_s
+                    if self.verbose: 
+                        print(f"  s {s:2d} aleph {aleph_s:5.2f} Q",Q_s,f"Vbot {Vbottom[s]:5.2f} Vtop {Vtop[s]:5.2f} Vtarget {Vtarget_s:5.2f} sP",sP_s)
                     for a in range(self.A):
-                        successorProbabilities = P[a][s]
-                        successors = np.where(successorProbabilities > 0)[0]
+                        P_sa = P[a][s]
+                        successors = np.where(P_sa > 0)[0]  # list of possible successor states
                         stack.update(successors)
-                        R_sa = R[a][s]
+                        ER_sa = ER[a][s]
                         ERsquared_sa = ERsquared[a][s]
-                        # update Q[s,a] and G[s,a]:
-                        EV = successorProbabilities.dot(V)
-                        Qnext[s,a] = R_sa + gamma*EV
-                        Gnext[s,a] = ERsquared_sa + 2*gamma*R_sa*EV + gamma**2*successorProbabilities.dot(W)
-                        # compute alephs of all successor states:
-                        Q_sa_or_aleph_s = Q_s[a] if Vtarget_s == aleph_s and sP[a] > 0 else aleph_s
                         # compute expectation of reward plus gamma times Vbottom or Vtop over all possible successor states:
-                        Qbottom_sa = R_sa + gamma*successorProbabilities.dot(Vbottom)
-                        Qtop_sa = R_sa + gamma*successorProbabilities.dot(Vtop)
+                        Qbottom_sa = P_sa.dot(ER_sa + gamma*Vbottom)
+                        Qtop_sa = P_sa.dot(ER_sa + gamma*Vtop)
+                        # update Q[s,a] and G[s,a]:
+                        Qnext[s,a] = P_sa.dot(ER_sa + gamma*V)
+                        Gnext[s,a] = P_sa.dot(ERsquared_sa + 2*gamma*ER_sa*V + gamma**2*W)
+                        # set alephs of all successor states,
+                        # using aspiration rescaling if the current aspiration currently appears feasible,
+                        # and retaining the current aleph otherwise:
+                        Q_sa_or_aleph_s = Q_s[a] if Vtarget_s == aleph_s and sP_s[a] > 0 else aleph_s
                         # compute relative aspiration level and use it to set rescaled absolute aspiration levels for all successor states:
-                        l = 0.5 if Qtop_sa == Qbottom_sa else (Q_sa_or_aleph_s - Qbottom_sa) / (Qtop_sa - Qbottom_sa)
+                        l = 0.5 if Qtop_sa == Qbottom_sa else min(max(0,(Q_sa_or_aleph_s - Qbottom_sa) / (Qtop_sa - Qbottom_sa)),1)
                         aleph[successors] = (1-l) * Vbottom[successors] + l * Vtop[successors]
-                    # update V[s]:
-                    Vnext[s] = Vtarget_s
-                    Wnext[s] = sP.dot(Gnext[s,:])
-                    stochasticPolicy[s,:] = sP
+                        if self.verbose:
+                            print(f"    a {a:2d} R {ER_sa:5.2f} Qbot {Qbottom_sa:5.2f} Qtop {Qtop_sa:5.2f} q {Q_sa_or_aleph_s:5.2f} l {l:5.2f} al",aleph[successors])
+                    # recalculate V and W for this state based on the updated Q and G:
+                    Vnext[s] = sP_s.dot(Qnext[s,:])
+                    Wnext[s] = sP_s.dot(Gnext[s,:])
+                    if self.verbose: 
+                        print(f"               new Q",Qnext[s,:],f"V {Vnext[s]:5.2f}")
 
-            print(Wnext)
+            print("aleph", aleph)
+            print("Vnext", Vnext)
 
             assert len(stack) == 0, "MDP appears not to be a tree"
 
@@ -205,3 +217,95 @@ class ARTree(MDP):
         self._endRun()
         self.policy = None  # policy is stochastic, so we don't store a deterministic policy!
 
+        assert V[0] == self.aleph0, "V[0] != aleph0"
+
+"""
+POSSIBLE CYCLIC BEHAVIOUR:
+
+...
+
+aleph [ 0.00  0.76 -0.59 -0.39  0.84  0.00  0.00  0.00  0.00  0.00  0.00  0.00
+  0.00  0.00  0.00  0.00  0.00  0.00  0.00  0.00  0.00]
+Vnext [-0.08  0.76 -0.59 -0.39  0.84  0.00  0.00  0.00  0.00  0.00  0.00  0.00
+  0.00  0.00  0.00  0.00  0.00  0.00  0.00  0.00  0.00]
+         0    3.109636
+new iteration
+  s  0 aleph  0.00 Q [-0.08  0.31] Vbot -0.08 Vtop  0.31 Vtarget  0.00 sP [ 0.79  0.21]
+    a  0 R -0.17 Qbot -0.43 Qtop  0.26 q -0.08 l  0.50 al [ 0.66 -0.65]
+    a  1 R -0.69 Qbot -0.16 Qtop  0.78 q  0.31 l  0.50 al [ 0.19  1.11]
+               new Q [ 0.00  0.00] V  0.00
+  s  1 aleph  0.66 Q [ 1.07  0.25] Vbot  0.25 Vtop  1.07 Vtarget  0.66 sP [ 0.50  0.50]
+    a  0 R  1.07 Qbot  1.07 Qtop  1.07 q  1.07 l  0.50 al [ 0.00  0.00]
+    a  1 R  0.25 Qbot  0.25 Qtop  0.25 q  0.25 l  0.50 al [ 0.00  0.00]
+               new Q [ 1.07  0.25] V  0.66
+  s  2 aleph -0.65 Q [-0.91 -0.39] Vbot -0.91 Vtop -0.39 Vtarget -0.65 sP [ 0.50  0.50]
+    a  0 R -0.91 Qbot -0.91 Qtop -0.91 q -0.91 l  0.50 al [ 0.00  0.00]
+    a  1 R -0.39 Qbot -0.39 Qtop -0.39 q -0.39 l  0.50 al [ 0.00  0.00]
+               new Q [-0.91 -0.39] V -0.65
+  s  3 aleph  0.19 Q [ 1.08 -0.70] Vbot -0.70 Vtop  1.08 Vtarget  0.19 sP [ 0.50  0.50]
+    a  0 R  1.08 Qbot  1.08 Qtop  1.08 q  1.08 l  0.50 al [ 0.00  0.00]
+    a  1 R -0.70 Qbot -0.70 Qtop -0.70 q -0.70 l  0.50 al [ 0.00  0.00]
+               new Q [ 1.08 -0.70] V  0.19
+  s  4 aleph  1.11 Q [ 0.70  1.53] Vbot  0.70 Vtop  1.53 Vtarget  1.11 sP [ 0.50  0.50]
+    a  0 R  0.70 Qbot  0.70 Qtop  0.70 q  0.70 l  0.50 al [ 0.00  0.00]
+    a  1 R  1.53 Qbot  1.53 Qtop  1.53 q  1.53 l  0.50 al [ 0.00  0.00]
+               new Q [ 0.70  1.53] V  1.11
+aleph [ 0.00  0.66 -0.65  0.19  1.11  0.00  0.00  0.00  0.00  0.00  0.00  0.00
+  0.00  0.00  0.00  0.00  0.00  0.00  0.00  0.00  0.00]
+Vnext [ 0.00  0.66 -0.65  0.19  1.11  0.00  0.00  0.00  0.00  0.00  0.00  0.00
+  0.00  0.00  0.00  0.00  0.00  0.00  0.00  0.00  0.00]
+         0    3.109636
+new iteration
+  s  0 aleph  0.00 Q [ 0.00  0.00] Vbot  0.00 Vtop  0.00 Vtarget  0.00 sP [ 1.00  0.00]
+    a  0 R -0.17 Qbot -0.43 Qtop  0.26 q  0.00 l  0.62 al [ 0.76 -0.59]
+    a  1 R -0.69 Qbot -0.16 Qtop  0.78 q  0.00 l  0.17 al [-0.39  0.84]
+               new Q [-0.08  0.31] V -0.08
+  s  1 aleph  0.76 Q [ 1.07  0.25] Vbot  0.25 Vtop  1.07 Vtarget  0.76 sP [ 0.62  0.38]
+    a  0 R  1.07 Qbot  1.07 Qtop  1.07 q  1.07 l  0.50 al [ 0.00  0.00]
+    a  1 R  0.25 Qbot  0.25 Qtop  0.25 q  0.25 l  0.50 al [ 0.00  0.00]
+               new Q [ 1.07  0.25] V  0.76
+  s  2 aleph -0.59 Q [-0.91 -0.39] Vbot -0.91 Vtop -0.39 Vtarget -0.59 sP [ 0.38  0.62]
+    a  0 R -0.91 Qbot -0.91 Qtop -0.91 q -0.91 l  0.50 al [ 0.00  0.00]
+    a  1 R -0.39 Qbot -0.39 Qtop -0.39 q -0.39 l  0.50 al [ 0.00  0.00]
+               new Q [-0.91 -0.39] V -0.59
+  s  3 aleph -0.39 Q [ 1.08 -0.70] Vbot -0.70 Vtop  1.08 Vtarget -0.39 sP [ 0.17  0.83]
+    a  0 R  1.08 Qbot  1.08 Qtop  1.08 q  1.08 l  0.50 al [ 0.00  0.00]
+    a  1 R -0.70 Qbot -0.70 Qtop -0.70 q -0.70 l  0.50 al [ 0.00  0.00]
+               new Q [ 1.08 -0.70] V -0.39
+  s  4 aleph  0.84 Q [ 0.70  1.53] Vbot  0.70 Vtop  1.53 Vtarget  0.84 sP [ 0.83  0.17]
+    a  0 R  0.70 Qbot  0.70 Qtop  0.70 q  0.70 l  0.50 al [ 0.00  0.00]
+    a  1 R  1.53 Qbot  1.53 Qtop  1.53 q  1.53 l  0.50 al [ 0.00  0.00]
+               new Q [ 0.70  1.53] V  0.84
+aleph [ 0.00  0.76 -0.59 -0.39  0.84  0.00  0.00  0.00  0.00  0.00  0.00  0.00
+  0.00  0.00  0.00  0.00  0.00  0.00  0.00  0.00  0.00]
+Vnext [-0.08  0.76 -0.59 -0.39  0.84  0.00  0.00  0.00  0.00  0.00  0.00  0.00
+  0.00  0.00  0.00  0.00  0.00  0.00  0.00  0.00  0.00]
+
+"""
+
+
+"""
+POSSIBLE CONVERGENT BUT INCONSISTENT BEHAVIOUR DUE TO TOO LOW ALEPH0:
+
+...
+
+
+Vnext [ 0.41  0.81 -0.63  0.00  0.00  0.00  0.00]
+         0    2.092540
+new iteration
+  s  0 aleph  0.10 Q [ 2.77  0.41] Vbot  0.41 Vtop  2.77 Vtarget  0.41 sP [ 0.00  1.00]
+    a  0 R  1.96 Qbot  2.77 Qtop  2.81 q  0.10 l -65.04 al [-1.86]
+    a  1 R  1.03 Qbot  0.41 Qtop  1.03 q  0.10 l -0.48 al [-0.93]
+               new Q [ 2.77  0.41] V  0.41
+  s  1 aleph -1.86 Q [ 0.81  0.85] Vbot  0.81 Vtop  0.85 Vtarget  0.81 sP [ 1.00  0.00]
+    a  0 R  0.81 Qbot  0.81 Qtop  0.81 q -1.86 l  0.50 al [ 0.00]
+    a  1 R  0.85 Qbot  0.85 Qtop  0.85 q -1.86 l  0.50 al [ 0.00]
+               new Q [ 0.81  0.85] V  0.81
+  s  2 aleph -0.93 Q [-0.63 -0.00] Vbot -0.63 Vtop -0.00 Vtarget -0.63 sP [ 1.00  0.00]
+    a  0 R -0.63 Qbot -0.63 Qtop -0.63 q -0.93 l  0.50 al [ 0.00]
+    a  1 R -0.00 Qbot -0.00 Qtop -0.00 q -0.93 l  0.50 al [ 0.00]
+               new Q [-0.63 -0.00] V -0.63
+V     [ 0.41  0.81 -0.63  0.00  0.00  0.00  0.00]
+aleph [ 0.10 -1.86 -0.93  0.00  0.00  0.00  0.00]
+Vnext [ 0.41  0.81 -0.63  0.00  0.00  0.00  0.00]
+"""
