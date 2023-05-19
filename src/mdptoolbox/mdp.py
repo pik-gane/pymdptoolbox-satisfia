@@ -232,10 +232,6 @@ class MDP(object):
         self.V = None
         # W should be stored as a vector ie shape of (S,) or (1, S)
         self.W = None
-        # Q should be stored as a matrix ie shape of (A, S)
-        self.Q = None
-        # G should be stored as a matrix ie shape of (A, S)
-        self.G = None
         # policy can also be stored as a vector
         self.policy = None
 
@@ -308,20 +304,20 @@ class MDP(object):
         # Calculate Q matrix
         for aa in range(self.A):
             Q[aa] = self.R[aa] + self.discount * self.P[aa].dot(V)
-        q_target = self.l * Q.max(axis=0) + (1-self.l) * Q.min(axis=0)
+        V_target = self.l * Q.max(axis=0) + (1-self.l) * Q.min(axis=0)
 
         Policy = np.zeros(self.S)
         for state in range(self.S):
             # To avoid sorting the Q function, an array is created that sorts the Q function.
             idx_sorted = np.argsort(Q[:, state])
             # Find the index of which the value in the Q function is equal to or larger than q_target. 
-            idx = np.searchsorted(Q[:, state], q_target[state], side = 'left', sorter = idx_sorted)
+            idx = np.searchsorted(Q[:, state], V_target[state], side = 'left', sorter = idx_sorted)
             # If idx is zero, we can not interpolate with smaller values. 
             if idx == 0:
                 Policy[state] = idx_sorted[idx]
             else:
                 # Calculate the probability of choosing the action which will lead to the Q-value smaller than q_target.
-                alpha = (Q[:, state][idx_sorted][idx] - q_target[state])/(Q[:, state][idx_sorted][idx] - Q[:, state][idx_sorted][idx-1])
+                alpha = (Q[:, state][idx_sorted][idx] - V_target[state])/(Q[:, state][idx_sorted][idx] - Q[:, state][idx_sorted][idx-1])
                 rand_ber = np.random.binomial(1, alpha)
                 # Choose the action which will lead to the Q-value smaller than q_target with probability alpha and the action leading to larger Q-value otherwise.
                 Policy[state] = rand_ber * idx_sorted[idx-1] + (1-rand_ber) * idx_sorted[idx]
@@ -368,10 +364,9 @@ class MDP(object):
         # Calculate Q matrix and G matrix
         for aa in range(self.A):
             Q[aa] = self.R[aa] + self.discount * self.P[aa].dot(V)
-            G[aa] = self.R[aa]**2 + 2*self.discount*self.R[aa] * self.P[aa].dot(V) + self.discount**2 * self.P[aa].dot(W)
-        self.Q = Q
-        self.G = G
-        V_target = self.l * self.Q.max(axis=0) + (1-self.l) * self.Q.min(axis=0)
+            G[aa] = np.sum(self.P[aa] *(self.reward[aa]**2 + 2*self.discount*self.reward[aa] * V.reshape((1, self.S))), axis = 1) + self.discount**2 * self.P[aa].dot(W)
+
+        V_target = self.l * Q.max(axis=0) + (1-self.l) * Q.min(axis=0)
         
         Policy0 = self.policy
         Policy = np.zeros((self.S, self.A))
@@ -763,10 +758,7 @@ class PolicyIteration(MDP):
                 self.l = 0.5
         elif mode in (2, "SatisficeMinVar"):
             self.mode = "SatisficeMinVar"
-            # set the initial values to zero
-            self.W = np.zeros(self.S)
-            self.Q = np.zeros((self.A, self.S))
-            self.G = np.zeros((self.A, self.S))
+            
             if 'l' in options:
                 self.l = options['l']
             else:
@@ -775,7 +767,7 @@ class PolicyIteration(MDP):
             raise ValueError("'mode' should be '0' for maximizing, "
                              " '1' for satisficing or '2' for satisficing while minimizing the variance. The strings "
                              "'maximize', 'satisfice' and 'SatisficeMinVar' can also be used.")
-        
+        self.reward = reward
         # Check if the user has supplied an initial policy. If not make one.
         if policy0 is None:
             # Initialise the policy to the one which maximises the expected
@@ -787,7 +779,7 @@ class PolicyIteration(MDP):
             elif self.mode == "satisfice":
                 null = np.zeros(self.S)
                 self.policy = self.Satisficing(null)
-                del null
+                del null 
             elif self.mode == "SatisficeMinVar":
                 self.policy = np.zeros((self.S, self.A))
                 null = np.zeros(self.S)
@@ -821,6 +813,8 @@ class PolicyIteration(MDP):
                 self.policy = policy0
         # set the initial values to zero
         self.V = np.zeros(self.S)
+        # set the initial values of W to zero
+        self.W = np.zeros(self.S)
         # Do some setup depending on the evaluation type
         if eval_type in (0, "matrix"):
             self.eval_type = "matrix"
@@ -859,9 +853,11 @@ class PolicyIteration(MDP):
         # ----------
         # Ppolicy(SxS)  = transition matrix for policy
         # PRpolicy(S)   = reward matrix for policy
+        # Rewardpolicy(SxS) = reward matrix for policy without compression
         #
         Ppolicy = np.empty((self.S, self.S))
         Rpolicy = np.zeros(self.S)
+        Rewardpolicy = np.zeros((self.S, self.S))
         for aa in range(self.A):  # avoid looping over S
             # the rows that use action a.
             ind = (self.policy == aa).nonzero()[0]
@@ -875,6 +871,7 @@ class PolicyIteration(MDP):
                 # perhaps harmful in this implementation c.f.
                 # mdp_computePpolicyPRpolicy.m
                 Rpolicy[ind] = self.R[aa][ind]
+                Rewardpolicy[ind] = self.reward[aa][ind]
         # self.R cannot be sparse with the code in its current condition, but
         # it should be possible in the future. Also, if R is so big that its
         # a good idea to use a sparse matrix for it, then converting PRpolicy
@@ -883,7 +880,7 @@ class PolicyIteration(MDP):
             Rpolicy = _sp.csr_matrix(Rpolicy)
         # self.Ppolicy = Ppolicy
         # self.Rpolicy = Rpolicy
-        return (Ppolicy, Rpolicy)
+        return (Ppolicy, Rpolicy, Rewardpolicy)
     
     def _evalPolicyIterative(self, V0=0, W0=0, epsilon=0.0001):
         # Evaluate a policy using iteration.
@@ -926,8 +923,6 @@ class PolicyIteration(MDP):
             else:
                 policy_V = np.array(V0).reshape(self.S)
 
-        policy_P, policy_R = self._computePpolicyPRpolicy()
-
         if self.verbose:
             _printVerbosity("Iteration", "V variation")
             
@@ -941,7 +936,7 @@ class PolicyIteration(MDP):
             else:
                 policy_W = np.array(W0).reshape(self.S)
 
-        policy_P, policy_R = self._computePpolicyPRpolicy()
+        policy_P, policy_R, policy_reward = self._computePpolicyPRpolicy()
 
         if self.verbose:
             _printVerbosity("Iteration", "V variation")
@@ -956,7 +951,7 @@ class PolicyIteration(MDP):
             Vprev = policy_V
             Wprev = policy_W
             policy_V = policy_R + self.discount * policy_P.dot(Vprev)
-            policy_W = policy_R**2 + 2*self.discount*policy_R * policy_P.dot(policy_V) + self.discount**2 * policy_P.dot(Wprev)
+            policy_W = np.sum(policy_P *(policy_reward**2 + 2*self.discount*policy_reward * Vprev.reshape((1, self.S))), axis = 1) + self.discount**2 * policy_P.dot(Wprev)
             variation = max(np.absolute(policy_V - Vprev).max(), np.absolute(policy_W - Wprev).max())
             if self.verbose:
                 _printVerbosity(itr, variation)
@@ -1042,7 +1037,7 @@ class PolicyIteration(MDP):
             
             for aa in range(self.A):
                 policy_V_matrix[aa, :] = self.policy[:, aa] * (self.R[aa] + self.discount * self.P[aa].dot(Vprev))
-                policy_W_matrix[aa, :] = self.policy[:, aa] * (self.R[aa]**2 + 2*self.discount*self.R[aa] * self.P[aa].dot(Vprev) + self.discount**2 * self.P[aa].dot(Wprev))
+                policy_W_matrix[aa, :] = self.policy[:, aa] * (np.sum(self.P[aa] *(self.reward[aa]**2 + 2*self.discount*self.reward[aa] * Vprev.reshape((1, self.S))), axis = 1) + self.discount**2 * self.P[aa].dot(Wprev))
             
             policy_V = np.sum(policy_V_matrix, axis=0)
             policy_W = np.sum(policy_W_matrix, axis=0)
