@@ -54,123 +54,136 @@ from random import choice
 def smallMDP():
     """ Example from email on 15.04.2023
     
-    States: 0: s0; 1: sA; ... (8 in total; sDEF is dublicated to include the random reward)
+    States: 0: s0; 1: sA; 2:sB3, 3:sB9; 4:sC4; 5:sC8; 6:cDEF; 7:sHigh; 8:sLow (9 in total; sHigh and sLow are the end state with either high or low reward, when the reward is deterministic, an action will lead to sHigh and stay there.)
     Actions: 0: A; 1: B; ... (6 in total)
     Transition probabilities (A x S x S):
     
-        P[0, :, :] =    |0 1 0 0 0 0 0 0|
-                        |0 1 0 0 0 0 0 0|
-                        |. . . . . . . .|
-                        |0 1 0 0 0 0 0 0|
+        P[0, :, :] =    |0 1 0 0 0 0 0 0 0|
+                        |0 0 0 0 0 0 0 1 0|
+                        |0 0 0 0 0 0 0 1 0|
+                        |0 0 0 0 0 0 0 1 0|
+                        |0 0 0 0 0 0 0 1 0|
+                        |0 0 0 0 0 0 0 1 0|
+                        |0 0 0 0 0 0 0 1 0|
+                        |0 0 0 0 0 0 0 1 0|
+                        |0 0 0 0 0 0 0 0 1|
         
-        P[1, :, :] =    |0 0 1/2 1/2 0 0 0 0|
-                        |0 0 1/2 1/2 0 0 0 0|
-                        |. . . . . . . . . .|
-                        |0 0 1/2 1/2 0 0 0 0|
+        P[2, :, :] =    |0 0 1/2 1/2 0 0 0 0 0|
+                        |0 0   0   0 0 0 0 1 0|
+                        |0 0   0   0 0 0 0 1 0|
+                        |0 0   0   0 0 0 0 1 0|
+                        |0 0   0   0 0 0 0 1 0|
+                        |0 0   0   0 0 0 0 1 0|
+                        |0 0   0   0 0 0 0 1 0|
+                        |0 0   0   0 0 0 0 1 0|
+                        |0 0   0   0 0 0 0 0 1|
                         
-        P[2, :, :] =    |0 0 0 0 1/2 1/2 0 0|
-                        |0 0 0 0 1/2 1/2 0 0|
-                        |. . . . . . . . . .|
-                        |0 0 0 0 1/2 1/2 0 0|
+        P[3, :, :] =    |0 0 0 0 1/2 1/2 0 0 0|
+                        |0 0 0 0   0   0 0 1 0|
+                        |0 0 0 0   0   0 0 1 0|
+                        |0 0 0 0   0   0 0 1 0|
+                        |0 0 0 0   0   0 0 1 0|
+                        |0 0 0 0   0   0 0 1 0|
+                        |0 0 0 0   0   0 0 1 0|
+                        |0 0 0 0   0   0 0 1 0|
+                        |0 0 0 0   0   0 0 0 1|
                         
-        P[(3, 4, 5), :, :] =    |0 0 0 0 0 0 1/2 1/2|
-                                |0 0 0 0 0 0 1/2 1/2|
-                                |. . . . . . . . . .|
-                                |0 0 0 0 0 0 1/2 1/2|
-
+        P[(3, 4), :, :] =   |0 0 0 0 0 0 1   0   0|
+                            |0 0 0 0 0 0 0 1/2 1/2|
+                            |0 0 0 0 0 0 0 1/2 1/2|
+                            |0 0 0 0 0 0 0 1/2 1/2|
+                            |0 0 0 0 0 0 0 1/2 1/2|
+                            |0 0 0 0 0 0 0 1/2 1/2|
+                            |0 0 0 0 0 0 0 1/2 1/2|
+                            |0 0 0 0 0 0 0   1   0|
+                            |0 0 0 0 0 0 0   0   1|
+        
+        P[5, :, :] =    |0 0 0 0 0 0 1 0 0|
+                        |0 0 0 0 0 0 0 1 0|
+                        |0 0 0 0 0 0 0 1 0|
+                        |0 0 0 0 0 0 0 1 0|
+                        |0 0 0 0 0 0 0 1 0|
+                        |0 0 0 0 0 0 0 1 0|
+                        |0 0 0 0 0 0 0 1 0|
+                        |0 0 0 0 0 0 0 1 0|
+                        |0 0 0 0 0 0 0 0 1|
                         
     Reward matrix (A x S x S):
     
-        R[0, :, :] =    |0  0 0 0 0 0 0 0|
-                        |0 18 0 0 0 0 0 0|
-                        |0  6 0 0 0 0 0 0|
-                        |0 18 0 0 0 0 0 0|
-                        |0  8 0 0 0 0 0 0|
-                        |0 16 0 0 0 0 0 0|
-                        |0  2 0 0 0 0 0 0|
-                        |0  2 0 0 0 0 0 0|
+        R[(0, 1, 2), :, :] =    |0 0 0 0 0 0 0  0 0|
+                                |0 0 0 0 0 0 0 18 0|
+                                |0 0 0 0 0 0 0  6 0|
+                                |0 0 0 0 0 0 0 18 0|
+                                |0 0 0 0 0 0 0  8 0|
+                                |0 0 0 0 0 0 0 16 0|
+                                |0 0 0 0 0 0 0  2 0|
+                                |0 0 0 0 0 0 0  0 0|
+                                |0 0 0 0 0 0 0  0 0|
                         
-        R[1, :, :] =    |0 0  0  0 0 0 0 0| (R[2, :, :] is the same except for the two non-zero column who shift to columns to the right)
-                        |0 0 18 18 0 0 0 0|
-                        |0 0  6  6 0 0 0 0|
-                        |0 0 18 18 0 0 0 0|
-                        |0 0  8  8 0 0 0 0|
-                        |0 0 16 16 0 0 0 0|
-                        |0 0  2  2 0 0 0 0|
-                        |0 0  2  2 0 0 0 0|
+        R[3, :, :] =    |0 0 0 0 0 0 0  0  0|
+                        |0 0 0 0 0 0 0 36 18|
+                        |0 0 0 0 0 0 0 12  6|
+                        |0 0 0 0 0 0 0 36 18|
+                        |0 0 0 0 0 0 0 16  8|
+                        |0 0 0 0 0 0 0 32 16|
+                        |0 0 0 0 0 0 0  4  2|
+                        |0 0 0 0 0 0 0  0  0|
+                        |0 0 0 0 0 0 0  0  0|
                         
-        R[3, :, :] =    |0 0 0 0 0 0  0  0|
-                        |0 0 0 0 0 0 18 36|
-                        |0 0 0 0 0 0  6 12|
-                        |0 0 0 0 0 0 18 36|
-                        |0 0 0 0 0 0  8 16|
-                        |0 0 0 0 0 0 16 32|
-                        |0 0 0 0 0 0  2  4|
-                        |0 0 0 0 0 0  2  4|
-                        
-        R[4, :, :] =    |0 0 0 0 0 0  0  0|
-                        |0 0 0 0 0 0  9 45|
-                        |0 0 0 0 0 0  3 15|
-                        |0 0 0 0 0 0  9 45|
-                        |0 0 0 0 0 0  4 20|
-                        |0 0 0 0 0 0  8 40|
-                        |0 0 0 0 0 0  1  5|
-                        |0 0 0 0 0 0  1  5|
+        R[4, :, :] =    |0 0 0 0 0 0 0  0  0|
+                        |0 0 0 0 0 0 0  45 9|
+                        |0 0 0 0 0 0 0  15 3|
+                        |0 0 0 0 0 0 0  45 9|
+                        |0 0 0 0 0 0 0  20 4|
+                        |0 0 0 0 0 0 0  40 8|
+                        |0 0 0 0 0 0 0  5  1|
+                        |0 0 0 0 0 0 0  0  0|
+                        |0 0 0 0 0 0 0  0  0|
 
-        R[5, :, :] =    |0 0 0 0 0 0  0  0|
-                        |0 0 0 0 0 0 54 54|
-                        |0 0 0 0 0 0 18 18|
-                        |0 0 0 0 0 0 54 54|
-                        |0 0 0 0 0 0 24 24|
-                        |0 0 0 0 0 0 48 48|
-                        |0 0 0 0 0 0  6  6|
-                        |0 0 0 0 0 0  6  6|
+        R[5, :, :] =    |0 0 0 0 0 0 0  0 0|
+                        |0 0 0 0 0 0 0 54 0|
+                        |0 0 0 0 0 0 0 18 0|
+                        |0 0 0 0 0 0 0 54 0|
+                        |0 0 0 0 0 0 0 24 0|
+                        |0 0 0 0 0 0 0 48 0|
+                        |0 0 0 0 0 0 0  6 0|
+                        |0 0 0 0 0 0 0  0 0|
+                        |0 0 0 0 0 0 0  0 0|
+
   
     """
     # Transition probability matrix
-    P = np.zeros((6, 8, 8))
-    P[0, :, 1] = np.ones(8)
-    P[1, :, (2, 3)] = 1/2 * np.ones(8)
-    P[2, :, (4, 5)] = 1/2 * np.ones(8)
-    P[(3, 4, 5), :, 6] = 1/2 * np.ones(8)
-    P[(3, 4, 5), :, 7] = 1/2 * np.ones(8)
+    P = np.zeros((6, 9, 9))
+    P[0, 0, 1] = 1
+    P[(0, 1, 2, 5), 1:7, 7] = np.ones(6)
+    P[:, (7, 8), (7, 8)] = 1
+    
+    P[1, 0, (2, 3)] = 0.5
+    P[2, 0, (4, 5)] = 0.5
+    
+    P[(3, 4, 5), 0, 6]=1
+    P[3, 1:7, (7, 8)] = 0.5 * np.ones(6)
+    P[4, 1:7, (7, 8)] = 0.5 * np.ones(6)
     
     # Reward matrix
-    R = np.zeros((6, 8, 8))
-    ABC = np.array([0, 18, 6, 18, 8, 16, 2, 2])
-    DSmall = np.array([0, 18, 6, 18, 8, 16, 2, 2])
-    DLarge = np.array([0, 36, 12, 36, 16, 32, 4, 4])
-    ESmall = np.array([0, 9, 3, 9, 4, 8, 1, 1])
-    ELarge = np.array([0, 45, 15, 45, 20, 40, 5, 5])
-    F = np.array([0, 54, 18, 54, 24, 48, 6, 6])
+    R = np.zeros((6, 9, 9))
+    ABC = np.array([18, 6, 18, 8, 16, 2])
+    DLarge = np.array([36, 12, 36, 16, 32, 4])
+    ESmall = np.array([9, 3, 9, 4, 8, 1])
+    ELarge = np.array([45, 15, 45, 20, 40, 5])
+    F = np.array([54, 18, 54, 24, 48, 6])
     
-    R[0, :, 1] = ABC
-    R[1, :, (2, 3)] = ABC
-    R[2, :, (4, 5)] = ABC
-    R[3, :, 6] = DSmall
-    R[3, :, 7] = DLarge
-    R[4, :, 6] = ESmall
-    R[4, :, 7] = ELarge
-    R[5, :, (6, 7)] = F
+    R[(0, 1, 2), 1:7, 7] = ABC
+    
+    R[3, 1:7, 7] = DLarge
+    R[3, 1:7, 8] = ABC
+    
+    R[4, 1:7, 7] = ELarge
+    R[4, 1:7, 8] = ESmall
+    
+    R[5, 1:7, 7] = F
     
     return (P, R)
-
-def Reward_SmallMDP(P, R, policy):
-    # P and R are the matrices defined in the SmallMDP example, NOT self.P en self.R that follow from the pymdptoolbox algorithms. 
-    if type(policy[0]) in (int, float):
-        # Possible states to be after taking the first action from state 0 (or s0). 
-        PossibleStates = np.nonzero(P[policy[0], 0, :])
-        # Provided transition probabilities are equally distributed among the number of options. 
-        Reward = R[np.array(policy)[PossibleStates], PossibleStates, :]
-        return np.average(Reward[Reward != 0])
-    elif type(policy[0]) in (list, np.ndarray):
-        # Calculate the weights for a weighted average of the reward.
-        weight = np.zeros((len(policy[0]), len(policy), len(policy)))
-        for aa in range(len(policy[0])):
-            for ss in range(len(policy)):
-                # Calculate the probability of starting in s0 and taking an action to arrive in state ss. Then take action aa from state ss. 
-                weight[aa, ss, :] = np.array(policy[0]) @ P[:, 0, ss] * np.array(policy[ss])[aa] * P[aa, ss, :]
-        return np.average(R, weights=weight)
 
 def forest(S=3, r1=4, r2=2, p=0.1, is_sparse=False):
     """Generate a MDP example based on a simple forest management scenario.
