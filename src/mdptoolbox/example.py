@@ -51,6 +51,75 @@ import scipy.sparse as _sp
 from random import choices
 from random import choice
 
+def snooker():
+    """ Snooker inspired example
+    
+    States: x = ijkl where
+        - i \in {1, 2, 3, 4}: match number
+        - j \in {1, 2}: frame number
+        - k \in {1, 2}: visit number
+        - l \in {1, 2}: ball number
+    x = 0: terminal state where player lost the tournament
+    x = 5: state where player won the tournament (after this state you will always be sent to x=0)
+    
+    Actions: 1: very low effort (p = 0.5); 2: low effort (p=0.7); 3: medium effortl (p=0.8); 4: high effort (p=0.9); 5: very high effort (p=0.95)
+    
+    Changes of states:
+    Succes:
+        - ijk1 -> ijk2
+        - i1k2 -> i211
+        - {12k2, 22k2} -> 3111
+        - 32k2 -> 4111
+        - 42k2 -> 5
+        
+    Fail:
+        - ij1l -> ij21
+        - 1j2l -> 2111
+        - {2j2l, 3j2l, 4j2l} -> 0
+    
+    P = 5x34x34 (A x S x S)
+    R = 34x1 (S x 1)
+
+    """
+
+    P = np.zeros((5, 34, 34))
+
+    prob_act = np.array([0.5, 0.7, 0.8, 0.9, 0.95])
+    for action in range(5):
+        A = np.zeros((4, 2, 2, 2, 4, 2, 2, 2))
+        for i in range(4):
+            for j in range(2):
+                for k in range(2):
+                    for l in range(2):
+                        #Succes:
+                        A[i, j, k, 0, i, j, k, 1] = prob_act[action]
+                        A[i, 0, k, 1, i, 1, 0, 0] = prob_act[action]
+                        A[0, 1, k, 1, 2, 0, 0, 0] = prob_act[action]
+                        A[1, 1, k, 1, 2, 0, 0, 0] = prob_act[action]
+                        A[2, 1, k, 1, 3, 0, 0, 0] = prob_act[action]
+                        #Terminal state (win)
+                        P[action, np.ravel_multi_index((3, 1, k, 1), (4, 2, 2, 2)), -1] = prob_act[action]
+                        
+                        #Fail:
+                        A[i, j, 0, l, i, j, 1, 0] = 1-prob_act[action]
+                        A[0, j, 1, l, 1, 0, 0, 0] = 1-prob_act[action]
+                        #Terminal state (loss)
+                        P[action, np.ravel_multi_index((1, j, 1, l), (4, 2, 2, 2)), -2] = 1-prob_act[action]
+                        P[action, np.ravel_multi_index((2, j, 1, l), (4, 2, 2, 2)), -2] = 1-prob_act[action]
+                        P[action, np.ravel_multi_index((3, j, 1, l), (4, 2, 2, 2)), -2] = 1-prob_act[action]
+        P[action, 0:32, 0:32] = A.reshape((32, 32))
+    
+    P[:, -1, -2] = 1
+    P[:, -2, -2] = 1
+    
+    R = np.zeros(34)
+    R[-1] = 1
+    
+    isTerminal = np.zeros(34)
+    isTerminal[[-2, -1]] = 1
+    
+    return (P, R, isTerminal)    
+
 def smallMDP():
     """ Example from email on 15.04.2023
     
@@ -183,7 +252,10 @@ def smallMDP():
     
     R[5, 1:7, 7] = F
     
-    return (P, R)
+    isTerminal = np.zeros(9)
+    isTerminal[[-2, -1]] = 1
+    
+    return (P, R, isTerminal)
 
 def forest(S=3, r1=4, r2=2, p=0.1, is_sparse=False):
     """Generate a MDP example based on a simple forest management scenario.
