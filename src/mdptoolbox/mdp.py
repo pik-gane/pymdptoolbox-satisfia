@@ -362,10 +362,15 @@ class MDP(object):
         Q = np.empty((self.A, self.S))
         G = np.empty((self.A, self.S))
         # Calculate Q matrix and G matrix
-        for aa in range(self.A):
-            Q[aa] = self.R[aa] + self.discount * self.P[aa].dot(V)
-            G[aa] = np.sum(self.P[aa] *(self.reward[aa]**2 + 2*self.discount*self.reward[aa] * V.reshape((1, self.S))), axis = 1) + self.discount**2 * self.P[aa].dot(W)
-
+        if self.reward_present:
+            for aa in range(self.A):
+                Q[aa] = self.R[aa] + self.discount * self.P[aa].dot(V)
+                G[aa] = np.sum(self.P[aa] *(self.reward[aa]**2 + 2*self.discount*self.reward[aa] * V.reshape((1, self.S))), axis = 1) + self.discount**2 * self.P[aa].dot(W)
+        else:
+            for aa in range(self.A):
+                Q[aa] = self.R[aa] + self.discount * self.P[aa].dot(V)
+                G[aa] = self.R[aa]**2 + 2*self.discount*self.R[aa] * self.P[aa].dot(V) + self.discount**2 * self.P[aa].dot(W)
+        
         V_target = self.l * Q.max(axis=0) + (1-self.l) * Q.min(axis=0)
         
         Policy0 = self.policy
@@ -767,7 +772,11 @@ class PolicyIteration(MDP):
             raise ValueError("'mode' should be '0' for maximizing, "
                              " '1' for satisficing or '2' for satisficing while minimizing the variance. The strings "
                              "'maximize', 'satisfice' and 'SatisficeMinVar' can also be used.")
-        self.reward = reward
+        if np.shape(reward) == (self.A, self.S, self.S):
+            self.reward_present = True
+            self.reward = reward
+        else:
+            self.reward_present = False
         # Check if the user has supplied an initial policy. If not make one.
         if policy0 is None:
             # Initialise the policy to the one which maximises the expected
@@ -871,7 +880,8 @@ class PolicyIteration(MDP):
                 # perhaps harmful in this implementation c.f.
                 # mdp_computePpolicyPRpolicy.m
                 Rpolicy[ind] = self.R[aa][ind]
-                Rewardpolicy[ind] = self.reward[aa][ind]
+                if self.reward_present:
+                    Rewardpolicy[ind] = self.reward[aa][ind]
         # self.R cannot be sparse with the code in its current condition, but
         # it should be possible in the future. Also, if R is so big that its
         # a good idea to use a sparse matrix for it, then converting PRpolicy
@@ -1035,10 +1045,14 @@ class PolicyIteration(MDP):
             policy_V_matrix = np.zeros((self.A, self.S))
             policy_W_matrix = np.zeros((self.A, self.S))
             
-            for aa in range(self.A):
-                policy_V_matrix[aa, :] = self.policy[:, aa] * (self.R[aa] + self.discount * self.P[aa].dot(Vprev))
-                policy_W_matrix[aa, :] = self.policy[:, aa] * (np.sum(self.P[aa] *(self.reward[aa]**2 + 2*self.discount*self.reward[aa] * Vprev.reshape((1, self.S))), axis = 1) + self.discount**2 * self.P[aa].dot(Wprev))
-            
+            if self.reward_present:
+                for aa in range(self.A):
+                    policy_V_matrix[aa, :] = self.policy[:, aa] * (self.R[aa] + self.discount * self.P[aa].dot(Vprev))
+                    policy_W_matrix[aa, :] = self.policy[:, aa] * (np.sum(self.P[aa] *(self.reward[aa]**2 + 2*self.discount*self.reward[aa] * Vprev.reshape((1, self.S))), axis = 1) + self.discount**2 * self.P[aa].dot(Wprev))
+            else:
+                for aa in range(self.A):
+                    policy_V_matrix[aa, :] = self.policy[:, aa] * (self.R[aa] + self.discount * self.P[aa].dot(Vprev))
+                    policy_W_matrix[aa, :] = self.policy[:, aa] * (self.R[aa]**2 + 2*self.discount*self.R[aa] * self.P[aa].dot(Vprev) + self.discount**2 * self.P[aa].dot(Wprev))
             policy_V = np.sum(policy_V_matrix, axis=0)
             policy_W = np.sum(policy_W_matrix, axis=0)
                         
@@ -1319,7 +1333,8 @@ class QLearning(MDP):
     """
 
     def __init__(self, transitions, reward, discount, n_iter=10000,
-                 skip_check=False):
+                 skip_check=False, mode=0, **options):
+        # Possible option include: l; this needs to be specified by 'l = ..'.
         # Initialise a Q-learning MDP.
 
         # The following check won't be done in MDP()'s initialisation, so let's
@@ -1343,6 +1358,46 @@ class QLearning(MDP):
         # Initialisations
         self.Q = np.zeros((self.S, self.A))
         self.mean_discrepancy = []
+        self.policy = np.zeros(self.S)
+        
+        if mode in (0, "maximize"):
+            self.mode = "maximize"
+        elif mode in (1, "satisfice"):
+            self.mode = "satisfice"
+            self.v_target = np.zeros(self.S)
+            if 'l' in options:
+                self.l = options['l']
+            else:
+                self.l = 0.5
+                
+        if 'isTerminal' in options:
+            self.isTerminal = options['isTerminal']
+        else:
+            self.isTerminal = np.zeros(self.S)
+
+    def action_selection(self, s):
+        # To avoid sorting the Q function, an array is created that sorts the Q function.
+        idx_sorted = np.argsort(self.Q[s, :])
+        # Find the index of which the value in the Q function is equal to or larger than V_target. 
+        idx = np.searchsorted(self.Q[s, :], self.v_target[s], side = 'left', sorter = idx_sorted)
+        # If idx is zero, we can not interpolate with smaller values. 
+        if idx == 0:
+            action = idx_sorted[idx]
+        elif idx == self.A:
+            # V_target is larger than maximum of Q
+            print("OOPS", self.Q[s,:], idx, self.v_target[s])
+            action = idx_sorted[idx-1]
+        else:
+            # Calculate the probability of choosing the action which will lead to the Q-value smaller than q_target.
+            alpha = (self.Q[s, :][idx_sorted][idx] - self.v_target[s])/(self.Q[s, :][idx_sorted][idx] - self.Q[s, :][idx_sorted][idx-1])
+            rand_ber = np.random.binomial(1, alpha)
+            # Choose the action which will lead to the Q-value smaller than q_target with probability alpha and the action leading to larger Q-value otherwise.
+            action = int(rand_ber * idx_sorted[idx-1] + (1-rand_ber) * idx_sorted[idx])
+        return action
+
+    def V_target(self):
+        self.v_target = self.l * self.Q.max(axis=1).reshape(self.S) + (1-self.l) * self.Q.min(axis=1).reshape(self.S)
+
 
     def run(self):
         # Run the Q-learning algoritm.
@@ -1354,19 +1409,24 @@ class QLearning(MDP):
         s = np.random.randint(0, self.S)
 
         for n in range(1, self.max_iter + 1):
-
+            if self.mode == "satisfice":
+                self.V_target()
+            
             # Reinitialisation of trajectories every 100 transitions
-            if (n % 100) == 0:
+            if (n % 100) == 0 or self.isTerminal[s] == 1 or sum([self.P[action][s, s] for action in range(self.A)]) == self.A:
                 s = np.random.randint(0, self.S)
 
             # Action choice : greedy with increasing probability
             # probability 1-(1/log(n+2)) can be changed
             pn = np.random.random()
             if pn < (1 - (1 / _math.log(n + 2))):
-                # optimal_action = self.Q[s, :].max()
-                a = self.Q[s, :].argmax()
+                if self.mode == "maximize":
+                    # optimal_action = self.Q[s, :].max()
+                    a = self.Q[s, :].argmax()
+                elif self.mode == "satisfice":
+                    a = self.action_selection(s)
             else:
-                a = np.random.randint(0, self.A)
+                    a = np.random.randint(0, self.A)
 
             # Simulating next state s_new and reward associated to <s,s_new,a>
             p_s_new = np.random.random()
@@ -1375,7 +1435,8 @@ class QLearning(MDP):
             while (p < p_s_new) and (s_new < (self.S - 1)):
                 s_new = s_new + 1
                 p = p + self.P[a][s, s_new]
-
+            # Alternative:
+            # s_new = np.random.choice(self.S, p = self.P[a][s, :])
             try:
                 r = self.R[a][s, s_new]
             except IndexError:
@@ -1386,7 +1447,11 @@ class QLearning(MDP):
 
             # Updating the value of Q
             # Decaying update coefficient (1/sqrt(n+2)) can be changed
-            delta = r + self.discount * self.Q[s_new, :].max() - self.Q[s, a]
+            
+            if self.mode == "maximize":
+                delta = r + self.discount * self.Q[s_new, :].max() - self.Q[s, a]
+            elif self.mode == "satisfice":
+                delta = r + self.discount * self.v_target[s_new] - self.Q[s, a]
             dQ = (1 / _math.sqrt(n + 2)) * delta
             self.Q[s, a] = self.Q[s, a] + dQ
 
@@ -1402,8 +1467,18 @@ class QLearning(MDP):
                 discrepancy = []
 
             # compute the value function and the policy
-            self.V = self.Q.max(axis=1)
-            self.policy = self.Q.argmax(axis=1)
+            if self.mode == "maximize":
+                self.V = self.Q.max(axis=1)
+                self.policy = self.Q.argmax(axis=1)
+            elif self.mode == "satisfice":
+                self.V_target()
+                self.V = self.v_target
+                policy = np.zeros(self.S)
+                for state in range(self.S):
+                    policy[state] = self.action_selection(state)
+
+                self.policy = policy
+                
 
         self._endRun()
 
