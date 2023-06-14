@@ -745,7 +745,7 @@ class PolicyIteration(MDP):
     """
 
     def __init__(self, transitions, reward, discount, policy0=None,
-                 max_iter=1000, eval_type=0, skip_check=False, mode=0, **options):
+                 max_iter=1000, eval_type=0, skip_check=False, mode=0, plot = False, **options):
         # Possible option include: max_value_iter, l; these need to be specified by 'max_value_iter = ...' or 'l = ..'.
         # Initialise a policy iteration MDP.
         #
@@ -840,6 +840,11 @@ class PolicyIteration(MDP):
                              "or '1' for iterative evaluation. The strings "
                              "'matrix' and 'iterative' can also be used.")
         
+        if plot:
+            self.plot = True
+            self.vlist = []
+        else:
+            self.plot = False
 
 
 
@@ -957,7 +962,7 @@ class PolicyIteration(MDP):
         done = False
         while not done:
             itr += 1
-
+            print('itr', itr)
             Vprev = policy_V
             Wprev = policy_W
             policy_V = policy_R + self.discount * policy_P.dot(Vprev)
@@ -966,6 +971,10 @@ class PolicyIteration(MDP):
             if self.verbose:
                 _printVerbosity(itr, variation)
 
+            # if self.plot:
+            #     # print(self.V[0])
+            #     self.vlist.append(self.V[0])
+            
             # ensure |Vn - Vpolicy| < epsilon
             if variation < ((1 - self.discount) / self.discount) * epsilon:
                 done = True
@@ -976,9 +985,11 @@ class PolicyIteration(MDP):
                 if self.verbose:
                     print(_MSG_STOP_MAX_ITER)
 
-            self.V = policy_V
-            self.W = policy_W
-        
+        self.V = policy_V
+        self.W = policy_W
+
+            
+
     def _evalMatrixPolicyIterative(self, V0=0, W0=0, epsilon=0.0001):
         # Evaluate a matrix policy using iteration. This algorithm also calculates the variance of the value function
         #
@@ -1092,7 +1103,7 @@ class PolicyIteration(MDP):
         # ----------
         # Vpolicy(S) = value function of the policy
         #
-        Ppolicy, Rpolicy = self._computePpolicyPRpolicy()
+        Ppolicy, Rpolicy, _ = self._computePpolicyPRpolicy()
         # V = PR + gPV  => (I-gP)V = PR  => V = inv(I-gP)* PR
         self.V = np.linalg.solve(
             (_sp.eye(self.S, self.S) - self.discount * Ppolicy), Rpolicy)
@@ -1119,7 +1130,10 @@ class PolicyIteration(MDP):
                 if self.eval_type == "matrix":
                     self._evalPolicyMatrix()
                 elif self.eval_type == "iterative":
-                    self._evalPolicyIterative()
+                    self._evalPolicyIterative(self.V, self.W)
+                if self.plot:
+                    # print(self.V[0])
+                    self.vlist.append(self.V[0])
                 policy_next = self.Satisficing()
             elif self.mode == "SatisficeMinVar":
                 self._evalMatrixPolicyIterative()
@@ -1333,7 +1347,7 @@ class QLearning(MDP):
     """
 
     def __init__(self, transitions, reward, discount, n_iter=10000,
-                 skip_check=False, mode=0, **options):
+                 skip_check=False, mode=0, plot = False, **options):
         # Possible option include: l; this needs to be specified by 'l = ..'.
         # Initialise a Q-learning MDP.
 
@@ -1374,6 +1388,12 @@ class QLearning(MDP):
             self.isTerminal = options['isTerminal']
         else:
             self.isTerminal = np.zeros(self.S)
+        
+        if plot:
+            self.plot = True
+            self.vlist = []
+        else:
+            self.plot = False
 
     def action_selection(self, s):
         # To avoid sorting the Q function, an array is created that sorts the Q function.
@@ -1470,6 +1490,7 @@ class QLearning(MDP):
             if self.mode == "maximize":
                 self.V = self.Q.max(axis=1)
                 self.policy = self.Q.argmax(axis=1)
+
             elif self.mode == "satisfice":
                 self.V_target()
                 self.V = self.v_target
@@ -1478,7 +1499,8 @@ class QLearning(MDP):
                     policy[state] = self.action_selection(state)
 
                 self.policy = policy
-                
+            if self.plot:
+                self.vlist.append(self.V[0])
 
         self._endRun()
 
