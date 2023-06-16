@@ -306,7 +306,7 @@ class MDP(object):
             Q[aa] = self.R[aa] + self.discount * self.P[aa].dot(V)
         V_target = self.l * Q.max(axis=0) + (1-self.l) * Q.min(axis=0)
 
-        Policy = np.zeros(self.S)
+        Policy = np.zeros((self.S, self.A))
         for state in range(self.S):
             # To avoid sorting the Q function, an array is created that sorts the Q function.
             idx_sorted = np.argsort(Q[:, state])
@@ -314,13 +314,15 @@ class MDP(object):
             idx = np.searchsorted(Q[:, state], V_target[state], side = 'left', sorter = idx_sorted)
             # If idx is zero, we can not interpolate with smaller values. 
             if idx == 0:
-                Policy[state] = idx_sorted[idx]
+                Policy[state, idx_sorted[idx]] = 0
             else:
                 # Calculate the probability of choosing the action which will lead to the Q-value smaller than q_target.
                 alpha = (Q[:, state][idx_sorted][idx] - V_target[state])/(Q[:, state][idx_sorted][idx] - Q[:, state][idx_sorted][idx-1])
-                rand_ber = np.random.binomial(1, alpha)
-                # Choose the action which will lead to the Q-value smaller than q_target with probability alpha and the action leading to larger Q-value otherwise.
-                Policy[state] = rand_ber * idx_sorted[idx-1] + (1-rand_ber) * idx_sorted[idx]
+                # rand_ber = np.random.binomial(1, alpha)
+                # # Choose the action which will lead to the Q-value smaller than q_target with probability alpha and the action leading to larger Q-value otherwise.
+                # Policy[state] = rand_ber * idx_sorted[idx-1] + (1-rand_ber) * idx_sorted[idx]
+                Policy[state, [idx_sorted][idx]] = alpha
+                Policy[state, [idx_sorted][idx-1]] = 1-alpha
         return Policy.astype(int)
 
     def SatisficingMinVar(self, V=None, W=None):
@@ -384,7 +386,7 @@ class MDP(object):
             bounds = [(0, 1) for aa in range(self.A)]
             result = minimize(ExpectedG, x0 = Policy0[ss, :], args=(G, ss,), method='trust-constr', constraints=cons, bounds=bounds)
             Policy[ss, :] = result.x
-            # Print the results is the solution is not found. 
+            # Print the results if the solution is not found. 
             if result.success == False:
                 print(result)
         return Policy
@@ -763,7 +765,6 @@ class PolicyIteration(MDP):
                 self.l = 0.5
         elif mode in (2, "SatisficeMinVar"):
             self.mode = "SatisficeMinVar"
-            
             if 'l' in options:
                 self.l = options['l']
             else:
@@ -786,11 +787,16 @@ class PolicyIteration(MDP):
                 self.policy, null = self.bellmanOperator(null)
                 del null
             elif self.mode == "satisfice":
+                # self.policy = np.zeros((self.S, self.A))
+                # null = np.zeros(self.S)
+                # self.policy = self.Satisficing(null, null)
+                # del null
                 null = np.zeros(self.S)
-                self.policy = self.Satisficing(null)
+                self.policy = self.Satisficing(null, null)
+                print('h')
                 del null 
             elif self.mode == "SatisficeMinVar":
-                self.policy = np.zeros((self.S, self.A))
+                # self.policy = np.zeros((self.S, self.A))
                 null = np.zeros(self.S)
                 self.policy = self.SatisficingMinVar(null, null)
                 del null
@@ -799,7 +805,7 @@ class PolicyIteration(MDP):
             # Make sure it is a numpy array
             policy0 = np.array(policy0)
             # Make sure the policy is the right size and shape
-            if self.mode == "SatisficeMinVar":
+            if self.mode == "satisfice" or self.mode == "SatisficeMinVar":
                 assert policy0.shape in ((self.S, self.A), (self.A, self.S)), \
                     "'policy0' must a matrix with dimensions SxA."
                 # reshape the policy to be a matrix
@@ -1127,18 +1133,17 @@ class PolicyIteration(MDP):
             elif self.mode == "satisfice":
                 # these _evalPolicy* functions will update the classes value
                 # attribute
-                if self.eval_type == "matrix":
-                    self._evalPolicyMatrix()
-                elif self.eval_type == "iterative":
-                    self._evalPolicyIterative(self.V, self.W)
-                if self.plot:
-                    # print(self.V[0])
-                    self.vlist.append(self.V[0])
+                # if self.eval_type == "matrix":
+                #     self._evalPolicyMatrix()
+                # elif self.eval_type == "iterative":
+                    # self._evalPolicyIterative(self.V, self.W)
+                self._evalMatrixPolicyIterative()
                 policy_next = self.Satisficing()
             elif self.mode == "SatisficeMinVar":
                 self._evalMatrixPolicyIterative()
                 policy_next = self.SatisficingMinVar()
-            
+            if self.plot:
+                self.vlist.append(self.V[0])
             # calculate in how many places does the old policy disagree with
             # the new policy
             n_different = (policy_next != self.policy).sum()
@@ -1975,3 +1980,5 @@ class ValueIterationGS(ValueIteration):
             self.policy.append(int(Q.argmax()))
 
         self._endRun()
+
+def foo():print(1234)
