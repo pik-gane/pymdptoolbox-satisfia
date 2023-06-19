@@ -314,16 +314,15 @@ class MDP(object):
             idx = np.searchsorted(Q[:, state], V_target[state], side = 'left', sorter = idx_sorted)
             # If idx is zero, we can not interpolate with smaller values. 
             if idx == 0:
-                Policy[state, idx_sorted[idx]] = 0
+                Policy[state, idx_sorted[idx]] = 1
             else:
                 # Calculate the probability of choosing the action which will lead to the Q-value smaller than q_target.
-                alpha = (Q[:, state][idx_sorted][idx] - V_target[state])/(Q[:, state][idx_sorted][idx] - Q[:, state][idx_sorted][idx-1])
-                # rand_ber = np.random.binomial(1, alpha)
-                # # Choose the action which will lead to the Q-value smaller than q_target with probability alpha and the action leading to larger Q-value otherwise.
-                # Policy[state] = rand_ber * idx_sorted[idx-1] + (1-rand_ber) * idx_sorted[idx]
-                Policy[state, [idx_sorted][idx]] = alpha
-                Policy[state, [idx_sorted][idx-1]] = 1-alpha
-        return Policy.astype(int)
+                alpha = (Q[idx_sorted[idx], state] - V_target[state])/(Q[idx_sorted[idx], state] - Q[idx_sorted[idx-1], state])
+                
+                Policy[state, idx_sorted[idx]] = 1 - alpha
+                Policy[state, idx_sorted[idx-1]] = alpha
+                
+        return Policy
 
     def SatisficingMinVar(self, V=None, W=None):
         # Apply the satisficing operator on the value function.
@@ -787,19 +786,11 @@ class PolicyIteration(MDP):
                 self.policy, null = self.bellmanOperator(null)
                 del null
             elif self.mode == "satisfice":
-                # self.policy = np.zeros((self.S, self.A))
-                # null = np.zeros(self.S)
-                # self.policy = self.Satisficing(null, null)
-                # del null
                 null = np.zeros(self.S)
-                self.policy = self.Satisficing(null, null)
-                print('h')
+                self.policy = self.Satisficing(null)
                 del null 
             elif self.mode == "SatisficeMinVar":
-                # self.policy = np.zeros((self.S, self.A))
-                null = np.zeros(self.S)
-                self.policy = self.SatisficingMinVar(null, null)
-                del null
+                self.policy = np.zeros((self.S, self.A))
         else:
             # Use the policy that the user supplied
             # Make sure it is a numpy array
@@ -831,10 +822,10 @@ class PolicyIteration(MDP):
         # set the initial values of W to zero
         self.W = np.zeros(self.S)
         # Do some setup depending on the evaluation type
+        if self.mode == "SatisficeMinVar" or self.mode == "satisfice":
+            eval_type = 1
         if eval_type in (0, "matrix"):
             self.eval_type = "matrix"
-            if self.mode == "SatisficeMinVar":
-                self.eval_type = "iterative"
         elif eval_type in (1, "iterative"):
             self.eval_type = "iterative"
             if 'max_value_iter' in options:
@@ -968,7 +959,6 @@ class PolicyIteration(MDP):
         done = False
         while not done:
             itr += 1
-            print('itr', itr)
             Vprev = policy_V
             Wprev = policy_W
             policy_V = policy_R + self.discount * policy_P.dot(Vprev)
@@ -976,10 +966,6 @@ class PolicyIteration(MDP):
             variation = max(np.absolute(policy_V - Vprev).max(), np.absolute(policy_W - Wprev).max())
             if self.verbose:
                 _printVerbosity(itr, variation)
-
-            # if self.plot:
-            #     # print(self.V[0])
-            #     self.vlist.append(self.V[0])
             
             # ensure |Vn - Vpolicy| < epsilon
             if variation < ((1 - self.discount) / self.discount) * epsilon:
@@ -1131,12 +1117,7 @@ class PolicyIteration(MDP):
                     self._evalPolicyIterative()
                 policy_next, _ = self.bellmanOperator()
             elif self.mode == "satisfice":
-                # these _evalPolicy* functions will update the classes value
-                # attribute
-                # if self.eval_type == "matrix":
-                #     self._evalPolicyMatrix()
-                # elif self.eval_type == "iterative":
-                    # self._evalPolicyIterative(self.V, self.W)
+                # these _evalPolicy* functions will update the classes value attribute
                 self._evalMatrixPolicyIterative()
                 policy_next = self.Satisficing()
             elif self.mode == "SatisficeMinVar":
@@ -1980,5 +1961,3 @@ class ValueIterationGS(ValueIteration):
             self.policy.append(int(Q.argmax()))
 
         self._endRun()
-
-def foo():print(1234)
