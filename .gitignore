@@ -6,4 +6,7 @@ docs/_build/
 *.py[co]
 *~
 *.egg-info/
-
+src/mdptoolbox/saves/*
+*mdp_org.py
+.vscode
+*comparison.ipynb
