@@ -1623,6 +1623,16 @@ class QLearningModified(MDP):
                 self.l = options['l']
             else:
                 self.l = 0.5
+        elif mode in (3, "ExpectedSARSA"):
+            self.mode = "ExpectedSARSA"
+            self.policy = np.zeros((self.S, self.A))
+            self.policy_exploitation = np.zeros((self.S, self.A))
+            self.v_target = np.zeros(self.S)
+            self.G = np.zeros((self.S, self.A))
+            if 'l' in options:
+                self.l = options['l']
+            else:
+                self.l = 0.5
                 
         if 'isTerminal' in options:
             self.isTerminal = options['isTerminal']
@@ -1652,24 +1662,248 @@ class QLearningModified(MDP):
             # Calculate the probability of choosing the action which will lead to the Q-value smaller than q_target.
             alpha = (self.Q[s, idx_sorted[idx]] - self.v_target[s])/(self.Q[s, idx_sorted[idx]] - self.Q[s, idx_sorted[idx-1]])
             self.policy[s, idx_sorted[idx]] = 1 - alpha
-            self.policy[s, idx_sorted[idx]] = alpha
+            self.policy[s, idx_sorted[idx-1]] = alpha
     
-    def policy_calculation_min_var(self, s):
-        # The sum of the solution should be equal to 1 and the solution * Q should be equal to V_target. 
-        cons = [{'type': 'eq', 'fun': lambda x:  x @ self.Q.T[:, s].reshape((self.A, 1)) - self.v_target[s]},
-                {'type': 'eq', 'fun': lambda x: np.ones((1, self.A)) @ x - 1}]
-        bounds = [(0, 1) for aa in range(self.A)]
-        result = minimize(ExpectedG, x0 = self.policy[s, :], args=(self.G.T, s,), method='trust-constr', constraints=cons, bounds=bounds)
-        self.policy[s, :] = np.maximum(result.x, 0)/np.sum(np.maximum(result.x, 0))
-        # Print the results if the solution is not found. 
-        if result.success == False:
-            print(result)
+    # def policy_calculation_min_var(self, s):
+    #     # The sum of the solution should be equal to 1 and the solution * Q should be equal to V_target. 
+    #     cons = [{'type': 'eq', 'fun': lambda x:  x @ self.Q.T[:, s].reshape((self.A, 1)) - self.v_target[s]},
+    #             {'type': 'eq', 'fun': lambda x: np.ones((1, self.A)) @ x - 1}]
+    #     bounds = [(0, 1) for aa in range(self.A)]
+    #     result = minimize(ExpectedG, x0 = self.policy[s, :], args=(self.G.T, s,), method='trust-constr', constraints=cons, bounds=bounds)
+    #     self.policy[s, :] = np.maximum(result.x, 0)/np.sum(np.maximum(result.x, 0))
+    #     # Print the results if the solution is not found. 
+    #     if result.success == False:
+    #         print(result)
+            
+    def policy_calculation_min_var(self, state):
+        # equal = self.v_target[:, None] == self.Q
+        # smaller = self.v_target[:, None] > self.Q
+        # larger = ~equal*~smaller
         
+        # # Best has the form: action with smaller value than V_target, p, action with larger/equal value than V_target
+        # best = (np.argmax(self.G[s, :]), 0, np.argmax(self.G[s, :]))
+        # for action in range(np.count_nonzero(equal[s, :])):
+        #     if self.G[s, action] < best[1]*self.G[s, best[0]] + (1-best[1])*self.G[s, best[2]]:
+        #         best = (action, 0, action)
+        # n_nonzero_larger = np.count_nonzero(larger[s, :])
+        # n_nonzero_smaller = np.count_nonzero(smaller[s, :])
+
+        # for large_action in range(n_nonzero_larger):
+        #     for small_action in range(n_nonzero_smaller):
+        #         p = ((self.Q*larger)[s, large_action] - self.v_target[s])/((self.Q*larger)[s, large_action] - (self.Q*smaller)[s, small_action])
+        #         G = p*self.G[s, small_action] + (1-p)*self.G[s, large_action]
+        #         G_best = best[1] * self.G[s, best[0]] + (1-best[1]) * self.G[s, best[2]]
+        #         if G < G_best:
+        #             best = (small_action, p, large_action)
+        
+        # self.policy[s, :] = np.zeros(self.A)
+        # self.policy[s, best[0]] = best[1]
+        # self.policy[s, best[2]] = (1-best[1])
+        
+        
+        equal = self.v_target[:, None] == self.Q
+        larger = self.v_target[:, None] < self.Q
+        smaller = ~equal * ~larger
+        
+        num = (self.Q-self.v_target.reshape((self.S, 1)))*larger
+        denom = np.array(list(map(lambda action: (self.Q - self.Q[:, action].reshape((self.S, 1)))*larger*smaller[:, action].reshape((self.S, 1)), np.arange(self.A))))
+        p = num/denom
+        argMin_combo = list([np.argmin(p*self.G) for i in range(self.S)])
+        idx_combo = np.unravel_index(argMin_combo, (self.A, 1, self.A))
+        best_combo = [(idx_combo[0][i], p[idx_combo[0][i], i, idx_combo[2][i]], idx_combo[2][i]) for i in range(self.S)]
+
+
+        Equal = ~equal*1000000000000000 + equal * self.G
+        argMin = list([np.argmin(Equal[i, :]) for i in range(self.S)])
+        idx = np.unravel_index(argMin, (1, self.A))
+        best = [idx[1][i] for i in range(self.S)]
+        
+
+        G_combo = best_combo[state][1]*self.G[state, best_combo[state][0]] + (1-best_combo[state][1])*self.G[state, best_combo[state][2]]
+        G = self.G[state, best[state]]
+        self.policy[state, :] = np.zeros(self.A)
+        if G_combo < G:
+            self.policy[state, best[0]] = best[1]
+            self.policy[state, best[2]] = 1-best[1]
+        else:
+            self.policy[state, best[state]] = 1
+
+        
+
+    
+    # def SARSA_policy(self, epsilon):
+    #     for state in range(self.S):
+    #         # The sum of the solution should be equal to 1 and the solution * Q should be equal to V_target. 
+    #         cons = [{'type': 'eq', 'fun': lambda x:  x @ self.Q.T[:, state].reshape((self.A, 1)) - self.v_target[state]},
+    #                 {'type': 'eq', 'fun': lambda x: np.ones((1, self.A)) @ x - 1}]
+    #         bounds = [(epsilon, 1) for aa in range(self.A)]
+    #         result = minimize(ExpectedG, x0 = self.policy[state, :], args=(self.G.T, state,), method='trust-constr', constraints=cons, bounds=bounds)
+    #         self.policy[state, :] = np.maximum(result.x, 0)/np.sum(np.maximum(result.x, 0))
+    #         # Print the results if the solution is not found. 
+    #         if result.success == False:
+    #             print(result)
+                
+    # def SARSA_policy(self, epsilon):
+    #     for state in range(self.S):
+    #         ## alle acties met self.Q == self.v_target
+    #         equal = np.where(self.Q[state, :] == self.v_target[state])
+    #         smaller = np.where(self.Q[state, :] < self.v_target[state])
+    #         larger = np.where(self.Q[state, :] > self.v_target[state])
+    #         # Best has the form: action with smaller value than V_target, p, action with larger/equal value than V_target
+    #         best = (np.argmax(self.G[state, :]), 0, np.argmax(self.G[state, :]), np.max(self.G[state, :]))
+    #         # print('best', best)
+    #         # print('equal', equal)
+    #         # print('n_equal', np.count_nonzero(equal[state, :]))
+    #         for action in equal[0]:
+    #             # print('self.G[state, action]', self.G[state, action])
+    #             if self.G[state, action] < best[3]:
+    #                 best = (action, 0, action, self.G[state, action])
+
+    #         for large_action in larger[0]:
+    #             for small_action in smaller[0]:
+    #                 # print('(self.Q*larger)[state, large_action]', (self.Q*larger)[state, large_action])
+    #                 # print('self.v_target[state]', self.v_target[state])
+    #                 # print('(self.Q*smaller)[state, small_action]', (self.Q*smaller)[state, small_action])
+    #                 p = (self.Q[state, large_action] - self.v_target[state])/(self.Q[state, large_action] - self.Q[state, small_action])
+    #                 # print('p', p)
+    #                 if p < 0 or p > 1:
+    #                     print('HELP! p: ', p)
+    #                     print('self.Q[state, :]', self.Q[state, :])
+    #                     print('larger[state, :]', larger[state, :])
+    #                     print('(self.Q*larger)', (self.Q*larger))
+    #                     print('large_action', large_action)
+                        
+    #                     print('(self.Q*larger)[state, large_action]', (self.Q*larger)[state, large_action])
+    #                     print('self.v_target[state]', self.v_target[state])
+    #                     print('(self.Q*smaller)[state, small_action]', (self.Q*smaller)[state, small_action])
+    #                 G = p*self.G[state, small_action] + (1-p)*self.G[state, large_action]
+    #                 if G < best[3]:
+    #                     best = (small_action, p, large_action, G)
+                        
+    #                     # print('best in loop', best)
+            
+    #         # [(p*large)[0, large_action] for large_action in range(np.count_nonzero(p[0]*large[0]))]
+            
+    #         self.policy_exploitation[state, :] = np.zeros(self.A)
+    #         self.policy_exploitation[state, best[0]] = best[1]
+    #         self.policy_exploitation[state, best[2]] = 1-best[1]
+    #         # print('self.policy_exploitation[state, best[0]]', self.policy_exploitation[state, best[0]])
+    #         # print('best[1]', best[1])
+            
+    #         # print('best', best)
+    #         # print('exploi', self.policy_exploitation)
+    #         policy = 1/self.A * np.ones(self.A)
+    #         self.policy[state, :] = epsilon * policy + np.maximum(0, self.policy_exploitation[state, :] - epsilon)
+    #         self.policy[state, :] = self.policy[state, :]/np.sum(self.policy[state, :])
+    #         # print('exploi', self.policy_exploitation)
+    #         # print('policy', self.policy)
+    
+    
+    
+    # def SARSA_policy(self, epsilon):
+        
+        
+    #     for state in range(self.S):
+    #         idx_sorted = np.argsort(self.Q[state, :])
+    #         # Find the index of which the value in the Q function is equal to or larger than V_target. 
+    #         idx0 = np.searchsorted(self.Q[state, :], self.v_target[state], side = 'left', sorter = idx_sorted)
+    #         initial_state = np.argmax(self.G[state, :])
+    #         # Best has the form: action with smaller value than V_target, p, action with larger/equal value than V_target
+    #         best = (initial_state, 0, initial_state, np.inf)
+    #         # print('best', best)
+    #         # print('equal', equal)
+    #         # print('n_equal', np.count_nonzero(equal[state, :]))
+    #         idx = idx0
+    #         while self.Q[state, idx_sorted[idx]] == self.v_target[state]:
+    #             # print('self.G[state, action]', self.G[state, action])
+    #             if self.G[state, idx_sorted[idx]] < best[3]:
+    #                 best = (idx_sorted[idx], 0, idx_sorted[idx], self.G[state, idx_sorted[idx]])
+    #                 idx += 1
+
+    #         for large_action in range(idx, self.A):
+    #             for small_action in range(idx0):
+    #                 # print('(self.Q*larger)[state, large_action]', (self.Q*larger)[state, large_action])
+    #                 # print('self.v_target[state]', self.v_target[state])
+    #                 # print('(self.Q*smaller)[state, small_action]', (self.Q*smaller)[state, small_action])
+    #                 p = (self.Q[state, large_action] - self.v_target[state])/(self.Q[state, large_action] - self.Q[state, small_action])
+    #                 # print('p', p)
+    #                 if p < 0 or p > 1:
+    #                     print('HELP! p: ', p)
+    #                     # print('self.Q[state, :]', self.Q[state, :])
+    #                     # print('larger[state, :]', larger[state, :])
+    #                     # print('(self.Q*larger)', (self.Q*larger))
+    #                     # print('large_action', large_action)
+                        
+    #                     # print('(self.Q*larger)[state, large_action]', (self.Q*larger)[state, large_action])
+    #                     # print('self.v_target[state]', self.v_target[state])
+    #                     # print('(self.Q*smaller)[state, small_action]', (self.Q*smaller)[state, small_action])
+    #                 G = p*self.G[state, small_action] + (1-p)*self.G[state, large_action]
+    #                 if G < best[3]:
+    #                     best = (small_action, p, large_action, G)
+                        
+    #                     # print('best in loop', best)
+            
+    #         # [(p*large)[0, large_action] for large_action in range(np.count_nonzero(p[0]*large[0]))]
+            
+    #         self.policy_exploitation[state, :] = np.zeros(self.A)
+    #         self.policy_exploitation[state, best[0]] = best[1]
+    #         self.policy_exploitation[state, best[2]] = 1-best[1]
+    #         # print('self.policy_exploitation[state, best[0]]', self.policy_exploitation[state, best[0]])
+    #         # print('best[1]', best[1])
+            
+    #         # print('best', best)
+    #         # print('exploi', self.policy_exploitation)
+    #         policy = 1/self.A * np.ones(self.A)
+    #         self.policy[state, :] = epsilon * policy + np.maximum(0, self.policy_exploitation[state, :] - epsilon)
+    #         self.policy[state, :] = self.policy[state, :]/np.sum(self.policy[state, :])
+    #         # print('exploi', self.policy_exploitation)
+    #         # print('policy', self.policy)  
+     
+     
+    # def p_calculation(self, state, small_action, large_action):
+    #     p = (self.Q[state, large_action] - self.v_target[state])/(self.Q[state, large_action] - self.Q[state, small_action])
+    #     G = p*self.G[state, small_action] + (1-p)*self.G[state, large_action]
+    #     return np.array(p, G)
+           
+    def SARSA_policy(self, epsilon):
+        equal = self.v_target[:, None] == self.Q
+        larger = self.v_target[:, None] < self.Q
+        smaller = ~equal * ~larger
+        
+        num = (self.Q-self.v_target.reshape((self.S, 1)))*larger
+        denom = np.array(list(map(lambda action: (self.Q - self.Q[:, action].reshape((self.S, 1)))*larger*smaller[:, action].reshape((self.S, 1)), np.arange(self.A))))
+        p = num/denom
+        argMin_combo = list([np.argmin(p*self.G) for i in range(self.S)])
+        idx_combo = np.unravel_index(argMin_combo, (self.A, 1, self.A))
+        best_combo = [(idx_combo[0][i], p[idx_combo[0][i], i, idx_combo[2][i]], idx_combo[2][i]) for i in range(self.S)]
+
+
+        Equal = ~equal*1000000000000000 + equal * self.G
+        argMin = list([np.argmin(Equal[i, :]) for i in range(self.S)])
+        idx = np.unravel_index(argMin, (1, self.A))
+        best = [idx[1][i] for i in range(self.S)]
+        
+        for state in range(self.S):
+            G_combo = best_combo[state][1]*self.G[state, best_combo[state][0]] + (1-best_combo[state][1])*self.G[state, best_combo[state][2]]
+            G = self.G[state, best[state]]
+            self.policy_exploitation[state, :] = np.zeros(self.A)
+            if G_combo < G:
+                self.policy_exploitation[state, best[0]] = best[1]
+                self.policy_exploitation[state, best[2]] = 1-best[1]
+            else:
+                self.policy_exploitation[state, best[state]] = 1
+
+            policy = 1/self.A * np.ones(self.A)
+            self.policy[state, :] = epsilon * policy + np.maximum(0, self.policy_exploitation[state, :] - epsilon)
+            self.policy[state, :] = self.policy[state, :]/np.sum(self.policy[state, :])
+           
+          
     def V_target(self):
         self.v_target = self.l * self.Q.max(axis=1).reshape(self.S) + (1-self.l) * self.Q.min(axis=1).reshape(self.S)
         
     def W_target(self):
-        self.w_target = self.l * (self.Q.max(axis=1)**2).reshape(self.S) + (1-self.l) * (self.Q.min(axis=1)**2).reshape(self.S)
+        G = self.G * np.array(self.policy>0)
+        self.w_target = self.l * G.max(axis=1).reshape(self.S) + (1-self.l) * G.min(axis=1).reshape(self.S)
 
     def run(self):
         # Run the Q-learning algoritm.
@@ -1680,12 +1914,17 @@ class QLearningModified(MDP):
         # initial state choice
         s = np.random.randint(0, self.S)
 
+        if self.mode == "satisfice":
+            self.V_target()
+        elif self.mode == "SatisficeMinVar":
+            self.V_target()
+            self.W_target()
+        elif self.mode == "ExpectedSARSA":
+            self.V_target()
+            self.SARSA_policy(1 - (1 / _math.log(3)))
+        
         for n in range(1, self.max_iter + 1):
-            if self.mode == "satisfice":
-                self.V_target()
-            elif self.mode == "SatisficeMinVar":
-                self.V_target()
-                self.W_target()
+            exploitation_rate = 1 - (1 / _math.log(n + 2))
             
             # Reinitialisation of trajectories every 100 transitions or if in terminal state
             if (n % 100) == 0 or self.isTerminal[s] == 1 or sum([self.P[action][s, s] for action in range(self.A)]) == self.A:
@@ -1694,18 +1933,23 @@ class QLearningModified(MDP):
             # Action choice : greedy with increasing probability
             # probability 1-(1/log(n+2)) can be changed
             pn = np.random.random()
-            if pn < (1 - (1 / _math.log(n + 2))):
-                if self.mode == "maximize":
-                    # optimal_action = self.Q[s, :].max()
-                    a = self.Q[s, :].argmax()
-                elif self.mode == "satisfice":
-                    self.policy_calculation(s)
-                    a = np.random.choice(self.A, p = self.policy[s, :])
-                elif self.mode == "SatisficeMinVar":
-                    self.policy_calculation_min_var(s)
-                    a = np.random.choice(self.A, p = self.policy[s, :])
+            # Expected SARSA has a epsilon exploring policy already
+            if self.mode == "ExpectedSARSA":
+                self.SARSA_policy(exploitation_rate)
+                a = np.random.choice(self.A, p = self.policy[s, :])
             else:
-                    a = np.random.randint(0, self.A)
+                if pn < exploitation_rate:
+                    if self.mode == "maximize":
+                        # optimal_action = self.Q[s, :].max()
+                        a = self.Q[s, :].argmax()
+                    elif self.mode == "satisfice":
+                        self.policy_calculation(s)
+                        a = np.random.choice(self.A, p = self.policy[s, :])
+                    elif self.mode == "SatisficeMinVar":
+                        self.policy_calculation_min_var(s)
+                        a = np.random.choice(self.A, p = self.policy[s, :])
+                else:
+                        a = np.random.randint(0, self.A)
 
             # Simulating next state s_new and reward associated to <s,s_new,a>
             p_s_new = np.random.random()
@@ -1726,16 +1970,21 @@ class QLearningModified(MDP):
 
             # Updating the value of Q
             # Decaying update coefficient (1/sqrt(n+2)) can be changed
-            exploration_rate = (1 / _math.sqrt(n + 2))
+            learning_rate = (1 / _math.sqrt(n + 2))
             if self.mode == "maximize":
                 delta = r + self.discount * self.Q[s_new, :].max() - self.Q[s, a]
             elif self.mode == "satisfice":
                 delta = r + self.discount * self.v_target[s_new] - self.Q[s, a]
             elif self.mode == "SatisficeMinVar":
                 delta = r + self.discount * self.v_target[s_new] - self.Q[s, a]
-                delta_G = self.discount**2 * self.w_target[s_new]
-                self.G[s, a] = self.G[s, a] + exploration_rate * delta + exploration_rate * delta_G
-            dQ = exploration_rate * delta
+                delta_G = r**2 + 2*self.discount * r * self.v_target[s_new] +  self.discount**2 * self.w_target[s_new] - self.G[s, a]
+                self.G[s, a] = self.G[s, a] + learning_rate * delta + learning_rate * delta_G
+            elif self.mode == "ExpectedSARSA":
+                V_next = self.policy[s_new, :].dot(self.Q[s_new, :])
+                delta = r + self.discount * V_next - self.Q[s, a]
+                delta_G = r**2 + 2*self.discount * r * V_next +  self.discount**2 * self.policy[s_new, :].dot(self.G[s_new, :]) - self.G[s, a]
+                self.G[s, a] = self.G[s, a] + learning_rate * delta_G
+            dQ = learning_rate * delta
             self.Q[s, a] = self.Q[s, a] + dQ
 
             # Updating the value of G
@@ -1765,6 +2014,10 @@ class QLearningModified(MDP):
                 self.V = self.v_target
                 for state in range(self.S):
                     self.policy_calculation_min_var(state)
+            elif self.mode == "ExpectedSARSA":
+                self.V_target()
+                self.V = self.v_target
+                self.SARSA_policy(exploitation_rate)
 
             if self.plot:
                 self.vlist.append(self.V[0])

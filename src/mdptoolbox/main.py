@@ -4,6 +4,8 @@ import mdp
 import numpy as np
 import numpy.ma as ma
 import matplotlib.pyplot as plt
+from tqdm.notebook import tqdm
+import time
 
 # Function to create a masked array
 def masked_arr(n_iter, max_iter):
@@ -74,20 +76,27 @@ def runQ(n_iter, P, R, gamma, mode, max_iter, exampleName, lambdas=[1], fill_val
 
     arr_list = create_arr(n_iter, max_iter, len(lambdas))
     for i in range(n_iter):
+        print(i)
+        t0 = time.time()
         for j in range(len(arr_list)):
             Q = mdp.QLearningModified(P, R, gamma, mode = mode, plot = True, l = lambdas[j], n_iter = max_iter)
             Q.run()
             arr_list[j][i, 0:len(Q.vlist)] = Q.vlist
-    
+            print(Q.V)
+            # print(Q.policy_exploitation)
+            print(Q.policy)
+            print(Q.Q)
+        t1 = time.time()
+        print(t1-t0)
     for j in range(len(arr_list)):
         fileName = str('Q_') + str(exampleName) + str('_mode=') + str(mode) + str('_l=') + str(lambdas[j]) + str('_n_iter=') + str(n_iter) + str('_max_iter=') + str(max_iter) + str('_fill_value=') + str(fill_value) + str('.csv')
         np.savetxt("src/mdptoolbox/saves/" + fileName, arr_list[j].filled(fill_value=fill_value), delimiter = ",")
 
 n_iter = 1
-max_iter = 10000
+max_iter = 100000
 P, R, _ = example.smallMDP()
 gamma = 0.5
-mode = 2
+mode = 0
 lambdas = [1]
 # fill_value = -99999
 exampleName = 'smallMDP'
