@@ -282,7 +282,7 @@ class MDP(object):
         #
         # Updates the value function and the Vprev-improving policy.
         #
-        # Returns: policy
+        # Returns: stochastic policy
         #
         # If V hasn't been sent into the method, then we assume to be working
         # on the objects V attribute
@@ -329,7 +329,7 @@ class MDP(object):
         #
         # Updates the value function and the Vprev-improving policy.
         #
-        # Returns: policy
+        # Returns: stochastic policy
         #
         # If V hasn't been sent into the method, then we assume to be working
         # on the objects V attribute
@@ -363,6 +363,8 @@ class MDP(object):
         Q = np.empty((self.A, self.S))
         G = np.empty((self.A, self.S))
         # Calculate Q matrix and G matrix
+        # There are two forms of reward: self.R and self.reward. self.R is calculated by the originial program (see the function _computeReward). However for calculating G, 
+        # this is not sufficient as information gets lots. Therefore, if the reward was initially given in the form AxSxS, then this full matrix is stored in self.reward. 
         if self.reward_present:
             for aa in range(self.A):
                 Q[aa] = self.R[aa] + self.discount * self.P[aa].dot(V)
@@ -377,11 +379,13 @@ class MDP(object):
         Policy0 = self.policy
         Policy = np.zeros((self.S, self.A))
 
-        #For exery state find the argmin of the expected variance while the expected value function is equal to V_target. 
+        # Note that this method is quite slow. Alternatives have been implemented for expected Sarsa. Those need to be properly tested and can then be used in this setting as well. 
+        # For exery state find the argmin of the expected variance while the expected value function is equal to V_target. 
         for ss in range(self.S):
-            # The sum of the solution should be equal to 1 and the solution * Q should be equal to V_target. 
+            # The sum of the solution (=probabilities) should be equal to 1 and the solution * Q should be equal to V_target. 
             cons = [{'type': 'eq', 'fun': lambda x:  x @ Q[:, ss].reshape((self.A, 1)) - V_target[ss]},
                     {'type': 'eq', 'fun': lambda x: np.ones((1, self.A)) @ x - 1}]
+            # All probabilities should be between 0 and 1. 
             bounds = [(0, 1) for aa in range(self.A)]
             result = minimize(ExpectedG, x0 = Policy0[ss, :], args=(G, ss,), method='trust-constr', constraints=cons, bounds=bounds)
             Policy[ss, :] = result.x
@@ -695,22 +699,31 @@ class PolicyIteration(MDP):
     max_iter : int, optional
         Maximum number of iterations. See the documentation for the ``MDP``
         class for details. Default is 1000.
-    max_value_iter : int, optional
-        Maximum number of iterations for the calculation of the value function in the iterative calculation method. 
-        Default is 10000. 
     eval_type : int or string, optional
         Type of function used to evaluate policy. 0 or "matrix" to solve as a
         set of linear equations. 1 or "iterative" to solve iteratively.
-        Type will always be iterative if the satisficing algorithm that minimizes the variance is chosen. 
-        Default: 0.
+        Type will always be iterative if one of the two satisficing algorithms are chosen.  
+        Default: 0 (=matrix evaluation).
     skip_check : bool
         By default we run a check on the ``transitions`` and ``rewards``
         arguments to make sure they describe a valid MDP. You can set this
         argument to True in order to skip this check.
+    plot : bool
+        Default: False
+        Setting plot to true will create an instance variable called vlist which contains the V-values of the initial state of all iterations. 
     mode: , optional
         Default: Bellmann Operator
-    l: float, optional
-        Lambda parameter in Satisficing or SatisficingMinVar algorithm.
+        0 or "maximize" will use the Bellmann Operator
+        1 or "satisfice" will use satisficing, it is possible to specify a lambda, see options. 
+        2 or "SatisficeMinVar" will use satisficing while minimizing the variance, it is possible to specify a lambda, see options. 
+    *options: (optional), Note: write the arguments as l = .. or max_value_iter = ... 
+        l: float, optional
+            Default is 0.5
+            Lambda parameter in Satisficing or SatisficingMinVar algorithm.
+        max_value_iter : int, optional
+            Default is 10000. 
+            Maximum number of iterations for the calculation of the value function in the iterative calculation method. 
+            
 
     Data Attributes
     ---------------
@@ -747,7 +760,7 @@ class PolicyIteration(MDP):
 
     def __init__(self, transitions, reward, discount, policy0=None,
                  max_iter=1000, eval_type=0, skip_check=False, mode=0, plot = False, **options):
-        # Possible option include: max_value_iter, l; these need to be specified by 'max_value_iter = ...' or 'l = ..'.
+        # Possible options include: max_value_iter, l; these need to be specified by 'max_value_iter = ...' or 'l = ..' (see Arguemnts above). 
         # Initialise a policy iteration MDP.
         #
         # Set up the MDP, but don't need to worry about epsilon values
@@ -823,6 +836,7 @@ class PolicyIteration(MDP):
         self.W = np.zeros(self.S)
         # Do some setup depending on the evaluation type
         if self.mode == "SatisficeMinVar" or self.mode == "satisfice":
+            # The matrix evaluation is not implemented for satisficing methods. 
             eval_type = 1
         if eval_type in (0, "matrix"):
             self.eval_type = "matrix"
@@ -895,7 +909,8 @@ class PolicyIteration(MDP):
         return (Ppolicy, Rpolicy, Rewardpolicy)
     
     def _evalPolicyIterative(self, V0=0, W0=0, epsilon=0.0001):
-        # Evaluate a policy using iteration.
+        # Evaluate a policy using iteration. Note this policy is a deterministic policy and has the shape 1xS.
+        # This algorithm also calculates the variance of the value function. 
         #
         # Arguments
         # ---------
@@ -908,7 +923,7 @@ class PolicyIteration(MDP):
         #    a cell array (1xA), each cell containing a sparse matrix (SxS) or
         #    a 2D array(SxA) possibly sparse
         # discount  = discount rate in ]0; 1[
-        # policy(S) = a policy
+        # policy(S) = a policy of shape 1xS
         # V0(S)     = starting value function, optional (default : zeros(S,1))
         # epsilon   = epsilon-optimal policy search, upper than 0,
         #    optional (default : 0.0001)
@@ -918,6 +933,7 @@ class PolicyIteration(MDP):
         # Evaluation
         # ----------
         # Vpolicy(S) = value function, associated to a specific policy
+        # Wpolicy(S) = variance of value function, associated to a specific policy
         #
         # Notes
         # -----
@@ -983,7 +999,8 @@ class PolicyIteration(MDP):
             
 
     def _evalMatrixPolicyIterative(self, V0=0, W0=0, epsilon=0.0001):
-        # Evaluate a matrix policy using iteration. This algorithm also calculates the variance of the value function
+        # Evaluate a matrix policy using iteration. Note: the policy calculated is stochastic and has the shape SxA. 
+        # This algorithm also calculates the variance of the value function
         #
         # Arguments
         # ---------
@@ -1048,6 +1065,7 @@ class PolicyIteration(MDP):
             policy_V_matrix = np.zeros((self.A, self.S))
             policy_W_matrix = np.zeros((self.A, self.S))
             
+            # Depending on how the reward is specified, W gets calculated in different ways. 
             if self.reward_present:
                 for aa in range(self.A):
                     policy_V_matrix[aa, :] = self.policy[:, aa] * (self.R[aa] + self.discount * self.P[aa].dot(Vprev))
@@ -1076,7 +1094,7 @@ class PolicyIteration(MDP):
         self.W = policy_W
 
     def _evalPolicyMatrix(self):
-        # Evaluate the value function of the policy using linear equations.
+        # Evaluate the value function of the policy using linear equations. This only works for the Bellmann operator
         #
         # Arguments
         # ---------
@@ -1117,7 +1135,6 @@ class PolicyIteration(MDP):
                     self._evalPolicyIterative()
                 policy_next, _ = self.bellmanOperator()
             elif self.mode == "satisfice":
-                # these _evalPolicy* functions will update the classes value attribute
                 self._evalMatrixPolicyIterative()
                 policy_next = self.Satisficing()
             elif self.mode == "SatisficeMinVar":
@@ -1127,6 +1144,8 @@ class PolicyIteration(MDP):
                 self.vlist.append(self.V[0])
             # calculate in how many places does the old policy disagree with
             # the new policy
+            # Note: it might be useful to change this way of checking convergence for the minimizing variance satisficing. The linear solver always gives slightly different answers, 
+            # so it will take long till it converged in this sense. Another posiblity is to change the calculation of the weights so that there is less fluctuation. 
             n_different = (policy_next != self.policy).sum()
             # if verbose then continue printing a table
             if self.verbose:
@@ -1258,7 +1277,6 @@ class PolicyIterationModified(PolicyIteration):
 
         self._endRun()
 
-
 class QLearning(MDP):
 
     """A discounted MDP solved using the Q learning algorithm.
@@ -1281,6 +1299,25 @@ class QLearning(MDP):
         By default we run a check on the ``transitions`` and ``rewards``
         arguments to make sure they describe a valid MDP. You can set this
         argument to True in order to skip this check.
+    plot : bool
+        Default: False
+        Setting plot to true will create an instance variable called vlist which contains the V-values of the initial state of all iterations. 
+    mode: , optional
+        Default: Bellmann Operator
+        0 or "maximize" will use the Bellmann Operator
+        1 or "satisfice" will use satisficing, it is possible to specify a lambda, see options. 
+        2 or "SatisficeMinVar" will use satisficing while minimizing the variance, it is possible to specify a lambda, see options. 
+        3 or "ExpectedSARSA" will use expected Sarsa while minimizing the variance. Note, this algorithm does not give the right answer yet. The value function and Q-value function are correct
+        except for the very first value. 
+    *options: (optional), Note: write the arguments as l = .., isTerminal = ...
+        l: float, optional
+            Default is 0.5
+            Lambda parameter in Satisficing or SatisficingMinVar algorithm.
+        isTerminal: array, optional
+            An array with 0 or one for every state. 1 means the state is a terminal state, 0 means it is not a terminal state. 
+            If no terminal state is specified it will try to find a terminal state by checking if all actions in that state lead to itself again. Otherwise, an episode will use 100 states. 
+            
+
 
     Data Attributes
     ---------------
@@ -1334,249 +1371,7 @@ class QLearning(MDP):
 
     def __init__(self, transitions, reward, discount, n_iter=10000,
                  skip_check=False, mode=0, plot = False, **options):
-        # Possible option include: l; this needs to be specified by 'l = ..'.
-        # Initialise a Q-learning MDP.
-
-        # The following check won't be done in MDP()'s initialisation, so let's
-        # do it here
-        self.max_iter = int(n_iter)
-        assert self.max_iter >= 10000, "'n_iter' should be greater than 10000."
-
-        if not skip_check:
-            # We don't want to send this to MDP because _computePR should not
-            #  be run on it, so check that it defines an MDP
-            _util.check(transitions, reward)
-
-        # Store P, S, and A
-        self.S, self.A = _computeDimensions(transitions)
-        self.P = self._computeTransition(transitions)
-
-        self.R = reward
-
-        self.discount = discount
-
-        # Initialisations
-        self.Q = np.zeros((self.S, self.A))
-        self.mean_discrepancy = []
-        self.policy = np.zeros(self.S)
-        
-        if mode in (0, "maximize"):
-            self.mode = "maximize"
-        elif mode in (1, "satisfice"):
-            self.mode = "satisfice"
-            self.v_target = np.zeros(self.S)
-            if 'l' in options:
-                self.l = options['l']
-            else:
-                self.l = 0.5
-        elif mode in (2, "SatisficeMinVar"):
-            self.mode = "SatisficeMinVar"
-            self.v_target = np.zeros(self.S)
-            if 'l' in options:
-                self.l = options['l']
-            else:
-                self.l = 0.5
-                
-        if 'isTerminal' in options:
-            self.isTerminal = options['isTerminal']
-        else:
-            self.isTerminal = np.zeros(self.S)
-        
-        if plot:
-            self.plot = True
-            self.vlist = []
-        else:
-            self.plot = False
-
-    def action_selection(self, s):
-        # To avoid sorting the Q function, an array is created that sorts the Q function.
-        idx_sorted = np.argsort(self.Q[s, :])
-        # Find the index of which the value in the Q function is equal to or larger than V_target. 
-        idx = np.searchsorted(self.Q[s, :], self.v_target[s], side = 'left', sorter = idx_sorted)
-        # If idx is zero, we can not interpolate with smaller values. 
-        if idx == 0:
-            action = idx_sorted[idx]
-        elif idx == self.A:
-            # V_target is larger than maximum of Q
-            print("OOPS", self.Q[s,:], idx, self.v_target[s])
-            action = idx_sorted[idx-1]
-        else:
-            # Calculate the probability of choosing the action which will lead to the Q-value smaller than q_target.
-            alpha = (self.Q[s, :][idx_sorted][idx] - self.v_target[s])/(self.Q[s, :][idx_sorted][idx] - self.Q[s, :][idx_sorted][idx-1])
-            rand_ber = np.random.binomial(1, alpha)
-            # Choose the action which will lead to the Q-value smaller than q_target with probability alpha and the action leading to larger Q-value otherwise.
-            action = int(rand_ber * idx_sorted[idx-1] + (1-rand_ber) * idx_sorted[idx])
-        return action
-    
-        
-    def V_target(self):
-        self.v_target = self.l * self.Q.max(axis=1).reshape(self.S) + (1-self.l) * self.Q.min(axis=1).reshape(self.S)
-
-
-    def run(self):
-        # Run the Q-learning algoritm.
-        discrepancy = []
-
-        self.time = _time.time()
-
-        # initial state choice
-        s = np.random.randint(0, self.S)
-
-        for n in range(1, self.max_iter + 1):
-            if self.mode == "satisfice" or self.mode == "SatisficeMinVar":
-                self.V_target()
-            
-            # Reinitialisation of trajectories every 100 transitions
-            if (n % 100) == 0 or self.isTerminal[s] == 1 or sum([self.P[action][s, s] for action in range(self.A)]) == self.A:
-                s = np.random.randint(0, self.S)
-
-            # Action choice : greedy with increasing probability
-            # probability 1-(1/log(n+2)) can be changed
-            pn = np.random.random()
-            if pn < (1 - (1 / _math.log(n + 2))):
-                if self.mode == "maximize":
-                    # optimal_action = self.Q[s, :].max()
-                    a = self.Q[s, :].argmax()
-                elif self.mode == "satisfice":
-                    a = self.action_selection(s)
-                elif self.mode == "SatisficeMinVar":
-                    a = self.action_selection_min_var(s)
-            else:
-                    a = np.random.randint(0, self.A)
-
-            # Simulating next state s_new and reward associated to <s,s_new,a>
-            p_s_new = np.random.random()
-            p = 0
-            s_new = -1
-            while (p < p_s_new) and (s_new < (self.S - 1)):
-                s_new = s_new + 1
-                p = p + self.P[a][s, s_new]
-            # Alternative:
-            # s_new = np.random.choice(self.S, p = self.P[a][s, :])
-            try:
-                r = self.R[a][s, s_new]
-            except IndexError:
-                try:
-                    r = self.R[s, a]
-                except IndexError:
-                    r = self.R[s]
-
-            # Updating the value of Q
-            # Decaying update coefficient (1/sqrt(n+2)) can be changed
-            
-            if self.mode == "maximize":
-                delta = r + self.discount * self.Q[s_new, :].max() - self.Q[s, a]
-            elif self.mode == "satisfice":
-                delta = r + self.discount * self.v_target[s_new] - self.Q[s, a]
-            dQ = (1 / _math.sqrt(n + 2)) * delta
-            self.Q[s, a] = self.Q[s, a] + dQ
-
-            # current state is updated
-            s = s_new
-
-            # Computing and saving maximal values of the Q variation
-            discrepancy.append(np.absolute(dQ))
-
-            # Computing means all over maximal Q variations values
-            if len(discrepancy) == 100:
-                self.mean_discrepancy.append(np.mean(discrepancy))
-                discrepancy = []
-
-            # compute the value function and the policy
-            if self.mode == "maximize":
-                self.V = self.Q.max(axis=1)
-                self.policy = self.Q.argmax(axis=1)
-
-            elif self.mode == "satisfice":
-                self.V_target()
-                self.V = self.v_target
-                policy = np.zeros(self.S)
-                for state in range(self.S):
-                    policy[state] = self.action_selection(state)
-
-                self.policy = policy
-            if self.plot:
-                self.vlist.append(self.V[0])
-
-        self._endRun()
-
-
-class QLearningModified(MDP):
-
-    """A discounted MDP solved using the Q learning algorithm.
-
-    Parameters
-    ----------
-    transitions : array
-        Transition probability matrices. See the documentation for the ``MDP``
-        class for details.
-    reward : array
-        Reward matrices or vectors. See the documentation for the ``MDP`` class
-        for details.
-    discount : float
-        Discount factor. See the documentation for the ``MDP`` class for
-        details.
-    n_iter : int, optional
-        Number of iterations to execute. This is ignored unless it is an
-        integer greater than the default value. Defaut: 10,000.
-    skip_check : bool
-        By default we run a check on the ``transitions`` and ``rewards``
-        arguments to make sure they describe a valid MDP. You can set this
-        argument to True in order to skip this check.
-
-    Data Attributes
-    ---------------
-    Q : array
-        learned Q matrix (SxA)
-    V : tuple
-        learned value function (S).
-    policy : tuple
-        learned optimal policy (S).
-    mean_discrepancy : array
-        Vector of V discrepancy mean over 100 iterations. Then the length of
-        this vector for the default value of N is 100 (N/100).
-
-    Examples
-    ---------
-    >>> # These examples are reproducible only if random seed is set to 0 in
-    >>> # both the random and numpy.random modules.
-    >>> import numpy as np
-    >>> import mdptoolbox, mdptoolbox.example
-    >>> np.random.seed(0)
-    >>> P, R = mdptoolbox.example.forest()
-    >>> ql = mdptoolbox.mdp.QLearning(P, R, 0.96)
-    >>> ql.run()
-    >>> ql.Q
-    array([[ 11.198909  ,  10.34652034],
-           [ 10.74229967,  11.74105792],
-           [  2.86980001,  12.25973286]])
-    >>> expected = (11.198908998901134, 11.741057920409865, 12.259732864170232)
-    >>> all(expected[k] - ql.V[k] < 1e-12 for k in range(len(expected)))
-    True
-    >>> ql.policy
-    (0, 1, 1)
-
-    >>> import mdptoolbox
-    >>> import numpy as np
-    >>> P = np.array([[[0.5, 0.5],[0.8, 0.2]],[[0, 1],[0.1, 0.9]]])
-    >>> R = np.array([[5, 10], [-1, 2]])
-    >>> np.random.seed(0)
-    >>> ql = mdptoolbox.mdp.QLearning(P, R, 0.9)
-    >>> ql.run()
-    >>> ql.Q
-    array([[ 33.33010866,  40.82109565],
-           [ 34.37431041,  29.67236845]])
-    >>> expected = (40.82109564847122, 34.37431040682546)
-    >>> all(expected[k] - ql.V[k] < 1e-12 for k in range(len(expected)))
-    True
-    >>> ql.policy
-    (1, 0)
-
-    """
-
-    def __init__(self, transitions, reward, discount, n_iter=10000,
-                 skip_check=False, mode=0, plot = False, **options):
-        # Possible option include: l; this needs to be specified by 'l = ..'.
+        # Possible option include: l; this needs to be specified by 'l = ..', 'isTerminal = ..'.
         # Initialise a Q-learning MDP.
 
         # The following check won't be done in MDP()'s initialisation, so let's
@@ -1625,7 +1420,9 @@ class QLearningModified(MDP):
                 self.l = 0.5
         elif mode in (3, "ExpectedSARSA"):
             self.mode = "ExpectedSARSA"
+            # In this policy, every entry will be non-zero so the algorithm will explore
             self.policy = np.zeros((self.S, self.A))
+            # This policy has zeros everywhere except for the locations where actions are mixed (no exploring, just exploitation)
             self.policy_exploitation = np.zeros((self.S, self.A))
             self.v_target = np.zeros(self.S)
             self.G = np.zeros((self.S, self.A))
@@ -1665,42 +1462,17 @@ class QLearningModified(MDP):
             self.policy[s, idx_sorted[idx-1]] = alpha
     
     # def policy_calculation_min_var(self, s):
-    #     # The sum of the solution should be equal to 1 and the solution * Q should be equal to V_target. 
-    #     cons = [{'type': 'eq', 'fun': lambda x:  x @ self.Q.T[:, s].reshape((self.A, 1)) - self.v_target[s]},
-    #             {'type': 'eq', 'fun': lambda x: np.ones((1, self.A)) @ x - 1}]
-    #     bounds = [(0, 1) for aa in range(self.A)]
-    #     result = minimize(ExpectedG, x0 = self.policy[s, :], args=(self.G.T, s,), method='trust-constr', constraints=cons, bounds=bounds)
-    #     self.policy[s, :] = np.maximum(result.x, 0)/np.sum(np.maximum(result.x, 0))
-    #     # Print the results if the solution is not found. 
-    #     if result.success == False:
-    #         print(result)
+        # # The sum of the solution should be equal to 1 and the solution * Q should be equal to V_target. 
+        # cons = [{'type': 'eq', 'fun': lambda x:  x @ self.Q.T[:, s].reshape((self.A, 1)) - self.v_target[s]},
+        #         {'type': 'eq', 'fun': lambda x: np.ones((1, self.A)) @ x - 1}]
+        # bounds = [(0, 1) for aa in range(self.A)]
+        # result = minimize(ExpectedG, x0 = self.policy[s, :], args=(self.G.T, s,), method='trust-constr', constraints=cons, bounds=bounds)
+        # self.policy[s, :] = np.maximum(result.x, 0)/np.sum(np.maximum(result.x, 0))
+        # # Print the results if the solution is not found. 
+        # if result.success == False:
+        #     print(result)
             
     def policy_calculation_min_var(self, state):
-        # equal = self.v_target[:, None] == self.Q
-        # smaller = self.v_target[:, None] > self.Q
-        # larger = ~equal*~smaller
-        
-        # # Best has the form: action with smaller value than V_target, p, action with larger/equal value than V_target
-        # best = (np.argmax(self.G[s, :]), 0, np.argmax(self.G[s, :]))
-        # for action in range(np.count_nonzero(equal[s, :])):
-        #     if self.G[s, action] < best[1]*self.G[s, best[0]] + (1-best[1])*self.G[s, best[2]]:
-        #         best = (action, 0, action)
-        # n_nonzero_larger = np.count_nonzero(larger[s, :])
-        # n_nonzero_smaller = np.count_nonzero(smaller[s, :])
-
-        # for large_action in range(n_nonzero_larger):
-        #     for small_action in range(n_nonzero_smaller):
-        #         p = ((self.Q*larger)[s, large_action] - self.v_target[s])/((self.Q*larger)[s, large_action] - (self.Q*smaller)[s, small_action])
-        #         G = p*self.G[s, small_action] + (1-p)*self.G[s, large_action]
-        #         G_best = best[1] * self.G[s, best[0]] + (1-best[1]) * self.G[s, best[2]]
-        #         if G < G_best:
-        #             best = (small_action, p, large_action)
-        
-        # self.policy[s, :] = np.zeros(self.A)
-        # self.policy[s, best[0]] = best[1]
-        # self.policy[s, best[2]] = (1-best[1])
-        
-        
         equal = self.v_target[:, None] == self.Q
         larger = self.v_target[:, None] < self.Q
         smaller = ~equal * ~larger
@@ -1708,188 +1480,70 @@ class QLearningModified(MDP):
         num = (self.Q-self.v_target.reshape((self.S, 1)))*larger
         denom = np.array(list(map(lambda action: (self.Q - self.Q[:, action].reshape((self.S, 1)))*larger*smaller[:, action].reshape((self.S, 1)), np.arange(self.A))))
         p = num/denom
-        argMin_combo = list([np.argmin(p*self.G) for i in range(self.S)])
+        argMin_combo = list([np.argmin((p*self.G)[:, i, :]) for i in range(self.S)])
         idx_combo = np.unravel_index(argMin_combo, (self.A, 1, self.A))
         best_combo = [(idx_combo[0][i], p[idx_combo[0][i], i, idx_combo[2][i]], idx_combo[2][i]) for i in range(self.S)]
-
 
         Equal = ~equal*1000000000000000 + equal * self.G
         argMin = list([np.argmin(Equal[i, :]) for i in range(self.S)])
         idx = np.unravel_index(argMin, (1, self.A))
         best = [idx[1][i] for i in range(self.S)]
         
-
         G_combo = best_combo[state][1]*self.G[state, best_combo[state][0]] + (1-best_combo[state][1])*self.G[state, best_combo[state][2]]
         G = self.G[state, best[state]]
         self.policy[state, :] = np.zeros(self.A)
         if G_combo < G:
-            self.policy[state, best[0]] = best[1]
-            self.policy[state, best[2]] = 1-best[1]
+            self.policy[state, best_combo[state][0]] = best_combo[state][1]
+            self.policy[state, best_combo[state][2]] = 1-best_combo[state][1]
         else:
             self.policy[state, best[state]] = 1
 
-        
-
-    
-    # def SARSA_policy(self, epsilon):
-    #     for state in range(self.S):
-    #         # The sum of the solution should be equal to 1 and the solution * Q should be equal to V_target. 
-    #         cons = [{'type': 'eq', 'fun': lambda x:  x @ self.Q.T[:, state].reshape((self.A, 1)) - self.v_target[state]},
-    #                 {'type': 'eq', 'fun': lambda x: np.ones((1, self.A)) @ x - 1}]
-    #         bounds = [(epsilon, 1) for aa in range(self.A)]
-    #         result = minimize(ExpectedG, x0 = self.policy[state, :], args=(self.G.T, state,), method='trust-constr', constraints=cons, bounds=bounds)
-    #         self.policy[state, :] = np.maximum(result.x, 0)/np.sum(np.maximum(result.x, 0))
-    #         # Print the results if the solution is not found. 
-    #         if result.success == False:
-    #             print(result)
-                
-    # def SARSA_policy(self, epsilon):
-    #     for state in range(self.S):
-    #         ## alle acties met self.Q == self.v_target
-    #         equal = np.where(self.Q[state, :] == self.v_target[state])
-    #         smaller = np.where(self.Q[state, :] < self.v_target[state])
-    #         larger = np.where(self.Q[state, :] > self.v_target[state])
-    #         # Best has the form: action with smaller value than V_target, p, action with larger/equal value than V_target
-    #         best = (np.argmax(self.G[state, :]), 0, np.argmax(self.G[state, :]), np.max(self.G[state, :]))
-    #         # print('best', best)
-    #         # print('equal', equal)
-    #         # print('n_equal', np.count_nonzero(equal[state, :]))
-    #         for action in equal[0]:
-    #             # print('self.G[state, action]', self.G[state, action])
-    #             if self.G[state, action] < best[3]:
-    #                 best = (action, 0, action, self.G[state, action])
-
-    #         for large_action in larger[0]:
-    #             for small_action in smaller[0]:
-    #                 # print('(self.Q*larger)[state, large_action]', (self.Q*larger)[state, large_action])
-    #                 # print('self.v_target[state]', self.v_target[state])
-    #                 # print('(self.Q*smaller)[state, small_action]', (self.Q*smaller)[state, small_action])
-    #                 p = (self.Q[state, large_action] - self.v_target[state])/(self.Q[state, large_action] - self.Q[state, small_action])
-    #                 # print('p', p)
-    #                 if p < 0 or p > 1:
-    #                     print('HELP! p: ', p)
-    #                     print('self.Q[state, :]', self.Q[state, :])
-    #                     print('larger[state, :]', larger[state, :])
-    #                     print('(self.Q*larger)', (self.Q*larger))
-    #                     print('large_action', large_action)
-                        
-    #                     print('(self.Q*larger)[state, large_action]', (self.Q*larger)[state, large_action])
-    #                     print('self.v_target[state]', self.v_target[state])
-    #                     print('(self.Q*smaller)[state, small_action]', (self.Q*smaller)[state, small_action])
-    #                 G = p*self.G[state, small_action] + (1-p)*self.G[state, large_action]
-    #                 if G < best[3]:
-    #                     best = (small_action, p, large_action, G)
-                        
-    #                     # print('best in loop', best)
-            
-    #         # [(p*large)[0, large_action] for large_action in range(np.count_nonzero(p[0]*large[0]))]
-            
-    #         self.policy_exploitation[state, :] = np.zeros(self.A)
-    #         self.policy_exploitation[state, best[0]] = best[1]
-    #         self.policy_exploitation[state, best[2]] = 1-best[1]
-    #         # print('self.policy_exploitation[state, best[0]]', self.policy_exploitation[state, best[0]])
-    #         # print('best[1]', best[1])
-            
-    #         # print('best', best)
-    #         # print('exploi', self.policy_exploitation)
-    #         policy = 1/self.A * np.ones(self.A)
-    #         self.policy[state, :] = epsilon * policy + np.maximum(0, self.policy_exploitation[state, :] - epsilon)
-    #         self.policy[state, :] = self.policy[state, :]/np.sum(self.policy[state, :])
-    #         # print('exploi', self.policy_exploitation)
-    #         # print('policy', self.policy)
-    
-    
-    
-    # def SARSA_policy(self, epsilon):
-        
-        
-    #     for state in range(self.S):
-    #         idx_sorted = np.argsort(self.Q[state, :])
-    #         # Find the index of which the value in the Q function is equal to or larger than V_target. 
-    #         idx0 = np.searchsorted(self.Q[state, :], self.v_target[state], side = 'left', sorter = idx_sorted)
-    #         initial_state = np.argmax(self.G[state, :])
-    #         # Best has the form: action with smaller value than V_target, p, action with larger/equal value than V_target
-    #         best = (initial_state, 0, initial_state, np.inf)
-    #         # print('best', best)
-    #         # print('equal', equal)
-    #         # print('n_equal', np.count_nonzero(equal[state, :]))
-    #         idx = idx0
-    #         while self.Q[state, idx_sorted[idx]] == self.v_target[state]:
-    #             # print('self.G[state, action]', self.G[state, action])
-    #             if self.G[state, idx_sorted[idx]] < best[3]:
-    #                 best = (idx_sorted[idx], 0, idx_sorted[idx], self.G[state, idx_sorted[idx]])
-    #                 idx += 1
-
-    #         for large_action in range(idx, self.A):
-    #             for small_action in range(idx0):
-    #                 # print('(self.Q*larger)[state, large_action]', (self.Q*larger)[state, large_action])
-    #                 # print('self.v_target[state]', self.v_target[state])
-    #                 # print('(self.Q*smaller)[state, small_action]', (self.Q*smaller)[state, small_action])
-    #                 p = (self.Q[state, large_action] - self.v_target[state])/(self.Q[state, large_action] - self.Q[state, small_action])
-    #                 # print('p', p)
-    #                 if p < 0 or p > 1:
-    #                     print('HELP! p: ', p)
-    #                     # print('self.Q[state, :]', self.Q[state, :])
-    #                     # print('larger[state, :]', larger[state, :])
-    #                     # print('(self.Q*larger)', (self.Q*larger))
-    #                     # print('large_action', large_action)
-                        
-    #                     # print('(self.Q*larger)[state, large_action]', (self.Q*larger)[state, large_action])
-    #                     # print('self.v_target[state]', self.v_target[state])
-    #                     # print('(self.Q*smaller)[state, small_action]', (self.Q*smaller)[state, small_action])
-    #                 G = p*self.G[state, small_action] + (1-p)*self.G[state, large_action]
-    #                 if G < best[3]:
-    #                     best = (small_action, p, large_action, G)
-                        
-    #                     # print('best in loop', best)
-            
-    #         # [(p*large)[0, large_action] for large_action in range(np.count_nonzero(p[0]*large[0]))]
-            
-    #         self.policy_exploitation[state, :] = np.zeros(self.A)
-    #         self.policy_exploitation[state, best[0]] = best[1]
-    #         self.policy_exploitation[state, best[2]] = 1-best[1]
-    #         # print('self.policy_exploitation[state, best[0]]', self.policy_exploitation[state, best[0]])
-    #         # print('best[1]', best[1])
-            
-    #         # print('best', best)
-    #         # print('exploi', self.policy_exploitation)
-    #         policy = 1/self.A * np.ones(self.A)
-    #         self.policy[state, :] = epsilon * policy + np.maximum(0, self.policy_exploitation[state, :] - epsilon)
-    #         self.policy[state, :] = self.policy[state, :]/np.sum(self.policy[state, :])
-    #         # print('exploi', self.policy_exploitation)
-    #         # print('policy', self.policy)  
-     
-     
-    # def p_calculation(self, state, small_action, large_action):
-    #     p = (self.Q[state, large_action] - self.v_target[state])/(self.Q[state, large_action] - self.Q[state, small_action])
-    #     G = p*self.G[state, small_action] + (1-p)*self.G[state, large_action]
-    #     return np.array(p, G)
+    def nanargmin_lastNaxes(A, N):
+        s = A.shape
+        new_shp = s[:-N] + (np.prod(s[-N:]),)
+        min_idx = np.nanargmin(A.reshape(new_shp), -1)
+        return np.unravel_index(min_idx, s[-N:])
            
     def SARSA_policy(self, epsilon):
+        # Create an array with true/false if the Q-value is equal/larger/smaller than v_target. 
         equal = self.v_target[:, None] == self.Q
         larger = self.v_target[:, None] < self.Q
         smaller = ~equal * ~larger
         
+        # The numerator in the fraction to calculate the mixing probability
         num = (self.Q-self.v_target.reshape((self.S, 1)))*larger
+        # The denominator in the fraction to calculate the mixing probability. This will result in a AxSxA array. The first A represents the 'large' actions, and the second A represents the 'small' actions. 
         denom = np.array(list(map(lambda action: (self.Q - self.Q[:, action].reshape((self.S, 1)))*larger*smaller[:, action].reshape((self.S, 1)), np.arange(self.A))))
+        # This array will contain many nan and inf, but that is not a problem, because the minimum mixture will not lie at those combinations of actions. 
         p = num/denom
-        argMin_combo = list([np.argmin(p*self.G) for i in range(self.S)])
+        # Find the arguments where the mixing is minimal.
+        # p_times_G = np.transpose((p*self.G), (1, 0, 2))
+        # print(p_times_G.shape)
+        # idx_combo = self.nanargmin_lastNaxes(p_times_G, 2)
+        # best_combo = [(idx_combo[0][i], p[idx_combo[0][i], i, idx_combo[1][i]], idx_combo[1][i]) for i in range(self.S)]
+        # Alternativa way to find the minimal mixing.
+        argMin_combo = list([np.argmin((p*self.G)[:, i, :]) for i in range(self.S)])
         idx_combo = np.unravel_index(argMin_combo, (self.A, 1, self.A))
+        # best_combo has the form: `large` action, mixing probability, `small` action. 
         best_combo = [(idx_combo[0][i], p[idx_combo[0][i], i, idx_combo[2][i]], idx_combo[2][i]) for i in range(self.S)]
 
-
-        Equal = ~equal*1000000000000000 + equal * self.G
+        # Create an array that is equal to G where Q is equal to v_target and very large otherwise. 
+        Equal = ~equal*1000000000000000 + equal*self.G
+        # Find the minimal variance for every state. 
         argMin = list([np.argmin(Equal[i, :]) for i in range(self.S)])
         idx = np.unravel_index(argMin, (1, self.A))
+        # best has the form: single action that minimizes the variance for every state
         best = [idx[1][i] for i in range(self.S)]
         
         for state in range(self.S):
+            # Calculate the variance based on mixture and on single states
             G_combo = best_combo[state][1]*self.G[state, best_combo[state][0]] + (1-best_combo[state][1])*self.G[state, best_combo[state][2]]
             G = self.G[state, best[state]]
             self.policy_exploitation[state, :] = np.zeros(self.A)
+            # Depending on which is smaller, the policy gets asigned certain actions. 
             if G_combo < G:
-                self.policy_exploitation[state, best[0]] = best[1]
-                self.policy_exploitation[state, best[2]] = 1-best[1]
+                self.policy_exploitation[state, best_combo[state][0]] = best_combo[state][1]
+                self.policy_exploitation[state,best_combo[state][2]] = 1-best_combo[state][1]
             else:
                 self.policy_exploitation[state, best[state]] = 1
 
@@ -1897,10 +1551,11 @@ class QLearningModified(MDP):
             self.policy[state, :] = epsilon * policy + np.maximum(0, self.policy_exploitation[state, :] - epsilon)
             self.policy[state, :] = self.policy[state, :]/np.sum(self.policy[state, :])
            
-          
+    # This function calculates v_target
     def V_target(self):
         self.v_target = self.l * self.Q.max(axis=1).reshape(self.S) + (1-self.l) * self.Q.min(axis=1).reshape(self.S)
         
+    # This function calculates the variance
     def W_target(self):
         G = self.G * np.array(self.policy>0)
         self.w_target = self.l * G.max(axis=1).reshape(self.S) + (1-self.l) * G.min(axis=1).reshape(self.S)
@@ -1921,6 +1576,7 @@ class QLearningModified(MDP):
             self.W_target()
         elif self.mode == "ExpectedSARSA":
             self.V_target()
+            # Some epsilon was chosen based on orignial code. It is possible to change this. 
             self.SARSA_policy(1 - (1 / _math.log(3)))
         
         for n in range(1, self.max_iter + 1):
