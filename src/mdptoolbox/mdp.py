@@ -1308,7 +1308,7 @@ class QLearning(MDP):
         1 or "satisfice" will use satisficing, it is possible to specify a lambda, see options. 
         2 or "SatisficeMinVar" will use satisficing while minimizing the variance, it is possible to specify a lambda, see options. 
         3 or "ExpectedSARSA" will use expected Sarsa while minimizing the variance. Note, this algorithm does not give the right answer yet. The value function and Q-value function are correct
-        except for the very first value. 
+        except for the very first value. (This algorithm is not properly implemented. The value of the initial state is different from the other algorithms)
     *options: (optional), Note: write the arguments as l = .., isTerminal = ...
         l: float, optional
             Default is 0.5
@@ -1460,43 +1460,18 @@ class QLearning(MDP):
             alpha = (self.Q[s, idx_sorted[idx]] - self.v_target[s])/(self.Q[s, idx_sorted[idx]] - self.Q[s, idx_sorted[idx-1]])
             self.policy[s, idx_sorted[idx]] = 1 - alpha
             self.policy[s, idx_sorted[idx-1]] = alpha
-    
-    # def policy_calculation_min_var(self, s):
-        # # The sum of the solution should be equal to 1 and the solution * Q should be equal to V_target. 
-        # cons = [{'type': 'eq', 'fun': lambda x:  x @ self.Q.T[:, s].reshape((self.A, 1)) - self.v_target[s]},
-        #         {'type': 'eq', 'fun': lambda x: np.ones((1, self.A)) @ x - 1}]
-        # bounds = [(0, 1) for aa in range(self.A)]
-        # result = minimize(ExpectedG, x0 = self.policy[s, :], args=(self.G.T, s,), method='trust-constr', constraints=cons, bounds=bounds)
-        # self.policy[s, :] = np.maximum(result.x, 0)/np.sum(np.maximum(result.x, 0))
-        # # Print the results if the solution is not found. 
-        # if result.success == False:
-        #     print(result)
-            
-    def policy_calculation_min_var(self, state):
-        equal = self.v_target[:, None] == self.Q
-        larger = self.v_target[:, None] < self.Q
-        smaller = ~equal * ~larger
-        
-        num = (self.Q-self.v_target.reshape((self.S, 1)))*larger
-        denom = np.array(list(map(lambda action: (self.Q - self.Q[:, action].reshape((self.S, 1)))*larger*smaller[:, action].reshape((self.S, 1)), np.arange(self.A))))
-        p = num/denom
-        argMin_combo = list([np.argmin((p*self.G)[:, i, :]) for i in range(self.S)])
-        idx_combo = np.unravel_index(argMin_combo, (self.A, 1, self.A))
-        best_combo = [(idx_combo[0][i], p[idx_combo[0][i], i, idx_combo[2][i]], idx_combo[2][i]) for i in range(self.S)]
 
-        Equal = ~equal*1000000000000000 + equal * self.G
-        argMin = list([np.argmin(Equal[i, :]) for i in range(self.S)])
-        idx = np.unravel_index(argMin, (1, self.A))
-        best = [idx[1][i] for i in range(self.S)]
-        
-        G_combo = best_combo[state][1]*self.G[state, best_combo[state][0]] + (1-best_combo[state][1])*self.G[state, best_combo[state][2]]
-        G = self.G[state, best[state]]
-        self.policy[state, :] = np.zeros(self.A)
-        if G_combo < G:
-            self.policy[state, best_combo[state][0]] = best_combo[state][1]
-            self.policy[state, best_combo[state][2]] = 1-best_combo[state][1]
-        else:
-            self.policy[state, best[state]] = 1
+    # This works, but takes a long time to run.
+    def policy_calculation_min_var(self, s):
+        # The sum of the solution should be equal to 1 and the solution * Q should be equal to V_target. 
+        cons = [{'type': 'eq', 'fun': lambda x:  x @ self.Q.T[:, s].reshape((self.A, 1)) - self.v_target[s]},
+                {'type': 'eq', 'fun': lambda x: np.ones((1, self.A)) @ x - 1}]
+        bounds = [(0, 1) for aa in range(self.A)]
+        result = minimize(ExpectedG, x0 = self.policy[s, :], args=(self.G.T, s,), method='trust-constr', constraints=cons, bounds=bounds)
+        self.policy[s, :] = np.maximum(result.x, 0)/np.sum(np.maximum(result.x, 0))
+        # Print the results if the solution is not found. 
+        if result.success == False:
+            print(result)
 
     def nanargmin_lastNaxes(A, N):
         s = A.shape
